@@ -1,0 +1,2253 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+    <title>מערכת מעקב פניות לקוחות | סנכרון בזמן אמת</title>
+    
+    <!-- Google Fonts: Heebo & Assistant -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- SheetJS (XLSX) לייצוא קבצי אקסל בעברית -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Heebo', 'Assistant', 'sans-serif'],
+                    },
+                    colors: {
+                        skysoft: {
+                            50: '#f4f9fe',
+                            100: '#e6f2fc',
+                            200: '#c7e3f9',
+                            300: '#98ccf4',
+                            400: '#60b0ec',
+                            500: '#3593df',
+                            600: '#2175c1',
+                            700: '#1b5d9c',
+                            800: '#194f81',
+                            900: '#19426b',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            font-family: 'Heebo', 'Assistant', sans-serif;
+            background-color: #f4f9fe;
+            color: #1e293b;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* תאי טקסט מתרחבים אוטומטית לגובה התוכן */
+        textarea.auto-expand {
+            resize: none;
+            overflow: hidden;
+            min-height: 44px;
+            line-height: 1.45;
+            transition: background-color 0.15s ease, border-color 0.15s ease;
+        }
+
+        /* סרגל גלילה עדין לטבלת האקסל */
+        .excel-scroll::-webkit-scrollbar {
+            height: 10px;
+            width: 8px;
+        }
+        .excel-scroll::-webkit-scrollbar-track {
+            background: #e6f2fc;
+            border-radius: 8px;
+        }
+        .excel-scroll::-webkit-scrollbar-thumb {
+            background: #98ccf4;
+            border-radius: 8px;
+        }
+        .excel-scroll::-webkit-scrollbar-thumb:hover {
+            background: #60b0ec;
+        }
+
+        /* קיבוע עמודה ראשונה וכותרת בגלילה */
+        .sticky-header th {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+        }
+        
+        @media (min-width: 768px) {
+            .sticky-col {
+                position: sticky;
+                right: 0;
+                z-index: 10;
+            }
+            .sticky-header th.sticky-col {
+                z-index: 30;
+            }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.25s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- ==================== מסך כניסה (LOGIN SCREEN) ==================== -->
+    <div id="login-screen" class="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-skysoft-100 via-white to-skysoft-200">
+        <div class="w-full max-w-md bg-white/95 backdrop-blur-md rounded-3xl shadow-xl border border-skysoft-200 p-6 sm:p-8 animate-fade-in">
+            <div class="text-center mb-6">
+                <div class="w-16 h-16 bg-gradient-to-tr from-skysoft-600 to-skysoft-400 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-skysoft-200">
+                    <i class="fa-solid fa-headset text-3xl"></i>
+                </div>
+                <h1 class="text-2xl sm:text-3xl font-bold text-skysoft-900">מעקב פניות לקוחות</h1>
+                <p class="text-sm text-skysoft-600 mt-1 font-medium">מערכת ניהול שירות ותמיכה • סנכרון ענן חי</p>
+                
+                <!-- חיווי סטטוס חיבור לענן במסך הכניסה -->
+                <div class="mt-3 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-skysoft-50 border border-skysoft-200 text-xs font-semibold text-skysoft-800">
+                    <span id="login-sync-dot" class="relative flex h-2.5 w-2.5">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+                    </span>
+                    <span id="login-sync-text">מתחבר לענן...</span>
+                </div>
+            </div>
+
+            <form id="login-form" class="space-y-4">
+                <div>
+                    <label for="login-username" class="block text-sm font-semibold text-skysoft-800 mb-1.5">שם משתמש</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-skysoft-400">
+                            <i class="fa-solid fa-user"></i>
+                        </span>
+                        <input type="text" id="login-username" required autocomplete="username"
+                            placeholder="הזן שם משתמש (לדוגמה: אילן)"
+                            class="w-full pr-10 pl-4 py-3.5 bg-skysoft-50/60 border border-skysoft-200 rounded-2xl text-base focus:outline-none focus:ring-2 focus:ring-skysoft-400 focus:bg-white transition">
+                    </div>
+                </div>
+
+                <div>
+                    <label for="login-password" class="block text-sm font-semibold text-skysoft-800 mb-1.5">סיסמה</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-skysoft-400">
+                            <i class="fa-solid fa-lock"></i>
+                        </span>
+                        <input type="password" id="login-password" required autocomplete="current-password"
+                            placeholder="הזן סיסמה"
+                            class="w-full pr-10 pl-4 py-3.5 bg-skysoft-50/60 border border-skysoft-200 rounded-2xl text-base focus:outline-none focus:ring-2 focus:ring-skysoft-400 focus:bg-white transition">
+                    </div>
+                </div>
+
+                <div id="login-error" class="hidden bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-xl flex items-center gap-2">
+                    <i class="fa-solid fa-circle-exclamation"></i>
+                    <span>שם משתמש או סיסמה שגויים</span>
+                </div>
+
+                <button type="submit"
+                    class="w-full py-3.5 px-6 bg-gradient-to-l from-skysoft-600 to-skysoft-500 hover:from-skysoft-700 hover:to-skysoft-600 active:scale-[0.99] text-white font-bold text-lg rounded-2xl shadow-md shadow-skysoft-200 transition flex items-center justify-center gap-2 cursor-pointer">
+                    <span>כניסה למערכת</span>
+                    <i class="fa-solid fa-arrow-left"></i>
+                </button>
+            </form>
+
+            <!-- כפתורי כניסה מהירה לנוחות שימוש במסך מגע -->
+            <div class="mt-6 pt-5 border-t border-skysoft-100">
+                <p class="text-xs text-center text-slate-500 mb-3">כניסה מהירה (סיסמת ברירת מחדל: <span class="font-mono font-bold text-skysoft-700">1234</span>):</p>
+                <div class="grid grid-cols-3 gap-2" id="quick-login-buttons">
+                    <!-- יאוכלס דינמית מהענן -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== הממשק הראשי (MAIN APPLICATION) ==================== -->
+    <div id="app-screen" class="hidden flex-1 flex flex-col">
+        
+        <!-- סרגל עליון (Header) -->
+        <header class="bg-white border-b border-skysoft-200 shadow-xs sticky top-0 z-40">
+            <div class="max-w-[1600px] mx-auto px-3 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+                
+                <!-- לוגו, כותרת וחיווי סנכרון בזמן אמת -->
+                <div class="flex items-center gap-3">
+                    <div class="w-11 h-11 bg-gradient-to-tr from-skysoft-600 to-skysoft-400 text-white rounded-2xl flex items-center justify-center shadow-sm shrink-0">
+                        <i class="fa-solid fa-table-list text-xl"></i>
+                    </div>
+                    <div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <h1 class="text-lg sm:text-xl font-bold text-skysoft-900 leading-tight">יומן פניות לקוחות</h1>
+                            <span id="role-badge" class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-skysoft-100 text-skysoft-700"></span>
+                            
+                            <!-- חיווי ויזואלי ברור: מחובר ומסונכרן בזמן אמת -->
+                            <div id="sync-status-badge" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold">
+                                <span class="relative flex h-2.5 w-2.5">
+                                    <span id="sync-ping" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span id="sync-dot" class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                                </span>
+                                <span id="sync-label">מחובר ומסונכרן בזמן אמת</span>
+                            </div>
+                        </div>
+                        <p class="text-xs text-slate-500 mt-0.5">שלום, <span id="current-user-name" class="font-semibold text-skysoft-700"></span> • <span id="live-clock" class="font-mono"></span></p>
+                    </div>
+                </div>
+
+                <!-- כפתורי פעולה מרכזיים -->
+                <div class="flex items-center gap-2 flex-wrap">
+                    <!-- הוספת פניה חדשה -->
+                    <button onclick="createNewTicketRow()"
+                        class="px-4 py-2.5 bg-gradient-to-l from-skysoft-600 to-skysoft-500 hover:from-skysoft-700 hover:to-skysoft-600 active:scale-95 text-white font-bold text-sm sm:text-base rounded-2xl shadow-sm flex items-center gap-2 transition cursor-pointer">
+                        <i class="fa-solid fa-plus"></i>
+                        <span>פניה חדשה</span>
+                    </button>
+
+                    <!-- דוח חודשי וייצוא (מנהל בלבד) -->
+                    <button id="btn-export-modal" onclick="openExportModal()"
+                        class="hidden px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-semibold text-sm rounded-2xl flex items-center gap-2 transition cursor-pointer">
+                        <i class="fa-solid fa-file-excel text-base"></i>
+                        <span class="hidden sm:inline">דוח חודשי ושיתוף</span>
+                        <span class="sm:hidden">אקסל</span>
+                    </button>
+
+                    <!-- הגדרות ניהול (מנהל בלבד) -->
+                    <button id="btn-admin-modal" onclick="openAdminModal()"
+                        class="hidden px-3.5 py-2.5 bg-skysoft-50 hover:bg-skysoft-100 text-skysoft-700 border border-skysoft-200 font-semibold text-sm rounded-2xl flex items-center gap-2 transition cursor-pointer">
+                        <i class="fa-solid fa-sliders"></i>
+                        <span class="hidden sm:inline">ניהול והרשאות</span>
+                    </button>
+
+                    <!-- התנתקות -->
+                    <button onclick="logout()" title="יציאה מהמערכת"
+                        class="p-2.5 bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600 rounded-2xl transition cursor-pointer">
+                        <i class="fa-solid fa-right-from-bracket text-base"></i>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- סרגל סינון, חיפוש וסטטיסטיקה מהירה -->
+        <section class="max-w-[1600px] w-full mx-auto px-3 sm:px-6 pt-4 pb-2">
+            <div class="bg-white rounded-2xl border border-skysoft-200 p-3 sm:p-4 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                
+                <!-- חיפוש וסינון -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 flex-1">
+                    <!-- חיפוש חופשי -->
+                    <div class="relative">
+                        <span class="absolute inset-y-0 right-0 pr-3 flex items-center text-skysoft-400">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                        </span>
+                        <input type="text" id="search-input" oninput="renderTable()"
+                            placeholder="חיפוש מספר פניה, פונה, מוסך, תקלה..."
+                            class="w-full pr-9 pl-3 py-2.5 bg-skysoft-50/50 border border-skysoft-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-skysoft-400 focus:bg-white">
+                    </div>
+
+                    <!-- סינון לפי חודש -->
+                    <div class="relative">
+                        <select id="month-filter" onchange="renderTable()"
+                            class="w-full px-3 py-2.5 bg-skysoft-50/50 border border-skysoft-200 rounded-xl text-sm font-medium text-skysoft-900 focus:outline-none focus:ring-2 focus:ring-skysoft-400">
+                            <option value="ALL">כל החודשים</option>
+                        </select>
+                    </div>
+
+                    <!-- סינון סטטוס -->
+                    <div class="flex bg-skysoft-50 p-1 rounded-xl border border-skysoft-200">
+                        <button type="button" onclick="setStatusFilter('ALL')" id="filter-ALL"
+                            class="flex-1 py-1.5 text-xs sm:text-sm font-bold rounded-lg bg-white text-skysoft-700 shadow-xs transition cursor-pointer">הכל</button>
+                        <button type="button" onclick="setStatusFilter('OPEN')" id="filter-OPEN"
+                            class="flex-1 py-1.5 text-xs sm:text-sm font-semibold rounded-lg text-slate-600 hover:text-skysoft-700 transition cursor-pointer">פתוחות</button>
+                        <button type="button" onclick="setStatusFilter('CLOSED')" id="filter-CLOSED"
+                            class="flex-1 py-1.5 text-xs sm:text-sm font-semibold rounded-lg text-slate-600 hover:text-skysoft-700 transition cursor-pointer">סגורות</button>
+                    </div>
+                </div>
+
+                <!-- מדדים מהירים + החלפת תצוגה במובייל -->
+                <div class="flex items-center justify-between lg:justify-end gap-3 pt-2 lg:pt-0 border-t lg:border-t-0 border-skysoft-100">
+                    <div class="flex items-center gap-2 text-xs sm:text-sm">
+                        <span class="px-3 py-1.5 rounded-xl bg-skysoft-50 text-skysoft-800 border border-skysoft-200 font-semibold">
+                            סה״כ: <strong id="stat-total">0</strong>
+                        </span>
+                        <span class="px-3 py-1.5 rounded-xl bg-amber-50 text-amber-800 border border-amber-200 font-semibold">
+                            פתוחות: <strong id="stat-open">0</strong>
+                        </span>
+                        <span class="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold">
+                            סגורות: <strong id="stat-closed">0</strong>
+                        </span>
+                    </div>
+
+                    <!-- מתג תצוגת טבלה / כרטיסיות -->
+                    <div class="flex bg-skysoft-100 p-1 rounded-xl shrink-0">
+                        <button onclick="setViewMode('table')" id="view-table-btn" title="תצוגת אקסל / טבלה"
+                            class="px-2.5 py-1.5 rounded-lg bg-white text-skysoft-700 shadow-xs text-xs font-bold flex items-center gap-1 cursor-pointer">
+                            <i class="fa-solid fa-table"></i>
+                            <span class="hidden sm:inline">טבלה</span>
+                        </button>
+                        <button onclick="setViewMode('cards')" id="view-cards-btn" title="תצוגת כרטיסיות מגע"
+                            class="px-2.5 py-1.5 rounded-lg text-skysoft-700 text-xs font-semibold flex items-center gap-1 cursor-pointer">
+                            <i class="fa-solid fa-id-card"></i>
+                            <span class="hidden sm:inline">כרטיסיות</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- אזור הטבלה (סגנון Excel / Access) -->
+        <main class="max-w-[1600px] w-full mx-auto px-3 sm:px-6 py-2 flex-1 flex flex-col">
+            
+            <!-- תצוגת טבלה ראשית -->
+            <div id="table-container" class="bg-white rounded-2xl border border-skysoft-200 shadow-xs overflow-hidden flex-1 flex flex-col">
+                <div class="overflow-x-auto excel-scroll flex-1">
+                    <table class="w-full border-collapse text-right min-w-[1420px]" id="tickets-table">
+                        <thead class="sticky-header">
+                            <tr id="table-head-row" class="bg-gradient-to-l from-skysoft-700 to-skysoft-600 text-white text-xs sm:text-sm font-bold select-none">
+                                <!-- כותרות העמודות ירונדרו דינמית -->
+                            </tr>
+                        </thead>
+                        <tbody id="tickets-tbody" class="divide-y divide-skysoft-100 text-sm">
+                            <!-- שורות הפניות ירונדרו כאן בזמן אמת -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- כפתור הוספת שורה בתחתית הטבלה -->
+                <div class="bg-skysoft-50/80 border-t border-skysoft-200 p-2.5 flex items-center justify-between">
+                    <button onclick="createNewTicketRow()"
+                        class="px-4 py-2 bg-white hover:bg-skysoft-100 text-skysoft-700 border border-skysoft-300 rounded-xl text-sm font-bold flex items-center gap-2 shadow-2xs transition cursor-pointer">
+                        <i class="fa-solid fa-plus-circle text-skysoft-500"></i>
+                        <span>הוסף שורת פניה חדשה (מספור אוטומטי ללא התנגשויות)</span>
+                    </button>
+                    <span class="text-xs text-slate-500 hidden sm:inline">
+                        <i class="fa-solid fa-cloud-arrow-up text-skysoft-500 ml-1"></i>
+                        כל שינוי נשמר אוטומטית בענן ומוצג מידית בכל המכשירים המחוברים
+                    </span>
+                </div>
+            </div>
+
+            <!-- תצוגת כרטיסיות למסכי מגע קטנים -->
+            <div id="cards-container" class="hidden grid grid-cols-1 md:grid-cols-2 gap-3 pb-6">
+                <!-- כרטיסיות ירונדרו כאן -->
+            </div>
+
+            <!-- מצב ריק -->
+            <div id="empty-state" class="hidden bg-white rounded-2xl border border-skysoft-200 p-10 text-center my-4">
+                <div class="w-16 h-16 bg-skysoft-100 text-skysoft-500 rounded-full flex items-center justify-center mx-auto mb-3 text-2xl">
+                    <i class="fa-solid fa-folder-open"></i>
+                </div>
+                <h3 class="text-lg font-bold text-skysoft-900">לא נמצאו פניות תואמות</h3>
+                <p class="text-sm text-slate-500 mt-1 mb-4">נסה לשנות את הסינון או לפתוח פניה חדשה</p>
+                <button onclick="createNewTicketRow()" class="px-5 py-2.5 bg-skysoft-600 text-white font-bold rounded-xl text-sm cursor-pointer">
+                    + פתיחת פניה חדשה
+                </button>
+            </div>
+        </main>
+    </div>
+
+    <!-- ==================== טופס פרטני בסגנון ACCESS בלחיצה על שורה ==================== -->
+    <div id="access-form-modal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+        <div class="bg-white rounded-3xl border border-skysoft-200 shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden animate-fade-in">
+            <!-- כותרת הטופס -->
+            <div class="bg-gradient-to-l from-skysoft-700 to-skysoft-500 text-white px-5 py-4 flex items-center justify-between shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center">
+                        <i class="fa-solid fa-id-card-clip text-xl"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h2 class="text-lg font-bold">כרטיס פניה פרטני</h2>
+                            <span id="access-modal-id" class="font-mono text-sm bg-white/20 px-2.5 py-0.5 rounded-lg font-bold"></span>
+                        </div>
+                        <p id="access-modal-meta" class="text-xs text-skysoft-100"></p>
+                    </div>
+                </div>
+                <button onclick="closeAccessFormModal()" class="w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center cursor-pointer">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- גוף הטופס הפרטני -->
+            <div id="access-form-body" class="p-5 sm:p-6 overflow-y-auto flex-1 space-y-4">
+                <!-- ירונדר דינמית עבור הפניה שנבחרה -->
+            </div>
+
+            <!-- סרגל תחתון של הכרטיס הפרטני -->
+            <div class="bg-skysoft-50 border-t border-skysoft-200 px-5 py-3 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="navigateAccessForm(-1)" class="px-3 py-2 bg-white hover:bg-skysoft-100 border border-skysoft-200 rounded-xl text-xs font-bold text-skysoft-800 flex items-center gap-1 cursor-pointer">
+                        <i class="fa-solid fa-chevron-right"></i>
+                        <span>הקודמת</span>
+                    </button>
+                    <button type="button" onclick="navigateAccessForm(1)" class="px-3 py-2 bg-white hover:bg-skysoft-100 border border-skysoft-200 rounded-xl text-xs font-bold text-skysoft-800 flex items-center gap-1 cursor-pointer">
+                        <span>הבאה</span>
+                        <i class="fa-solid fa-chevron-left"></i>
+                    </button>
+                </div>
+                <button type="button" onclick="closeAccessFormModal()" class="px-5 py-2 bg-skysoft-600 hover:bg-skysoft-700 text-white font-bold rounded-xl text-sm cursor-pointer">
+                    סגור וחזור לטבלה
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== חלון ייצוא דוח חודשי ושיתוף (מנהל בלבד) ==================== -->
+    <div id="export-modal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl border border-skysoft-200 shadow-2xl w-full max-w-lg overflow-hidden animate-fade-in">
+            <div class="bg-gradient-to-l from-skysoft-700 to-skysoft-500 text-white px-6 py-4 flex items-center justify-between">
+                <div class="flex items-center gap-2.5">
+                    <i class="fa-solid fa-file-excel text-xl"></i>
+                    <h2 class="text-lg font-bold">ייצוא דוח חודשי ושיתוף</h2>
+                </div>
+                <button onclick="closeExportModal()" class="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center cursor-pointer">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="p-6 space-y-5">
+                <div>
+                    <label class="block text-sm font-bold text-skysoft-900 mb-2">בחר חודש להפקת הדוח:</label>
+                    <select id="export-month-select" onchange="updateExportPreview()"
+                        class="w-full p-3 bg-skysoft-50 border border-skysoft-200 rounded-2xl text-base font-semibold text-skysoft-900 focus:outline-none focus:ring-2 focus:ring-skysoft-400">
+                    </select>
+                </div>
+
+                <!-- תצוגה מקדימה של נתוני הדוח -->
+                <div class="bg-skysoft-50/80 border border-skysoft-200 rounded-2xl p-4 space-y-2">
+                    <div class="flex justify-between text-sm">
+                        <span class="text-slate-600">סה״כ פניות בדוח:</span>
+                        <span id="export-count-total" class="font-bold text-skysoft-900">0</span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-slate-600">פניות שטופלו ונסגרו:</span>
+                        <span id="export-count-closed" class="font-bold text-emerald-700">0</span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-slate-600">פניות פתוחות בטיפול:</span>
+                        <span id="export-count-open" class="font-bold text-amber-700">0</span>
+                    </div>
+                </div>
+
+                <div class="space-y-2.5">
+                    <button onclick="downloadExcelReport()"
+                        class="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold rounded-2xl shadow-xs flex items-center justify-center gap-2.5 transition cursor-pointer">
+                        <i class="fa-solid fa-download text-lg"></i>
+                        <span>הורד קובץ אקסל מלא (.xlsx)</span>
+                    </button>
+
+                    <div class="grid grid-cols-2 gap-2.5 pt-1">
+                        <button onclick="shareReport('whatsapp')"
+                            class="py-3 px-4 bg-[#25D366] hover:bg-[#20bd5a] active:scale-[0.99] text-white font-bold rounded-2xl shadow-xs flex items-center justify-center gap-2 transition cursor-pointer">
+                            <i class="fa-brands fa-whatsapp text-xl"></i>
+                            <span>שלח בוואטסאפ</span>
+                        </button>
+
+                        <button onclick="shareReport('email')"
+                            class="py-3 px-4 bg-skysoft-600 hover:bg-skysoft-700 active:scale-[0.99] text-white font-bold rounded-2xl shadow-xs flex items-center justify-center gap-2 transition cursor-pointer">
+                            <i class="fa-solid fa-envelope text-lg"></i>
+                            <span>שלח במייל</span>
+                        </button>
+                    </div>
+                    <p class="text-xs text-slate-500 text-center pt-1">
+                        בעת לחיצה על שיתוף, קובץ האקסל יירד אוטומטית וייפתח חלון השליחה עם סיכום הנתונים (במובייל הקובץ יצורף ישירות).
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== חלון ניהול מערכת והרשאות (מנהל בלבד) ==================== -->
+    <div id="admin-modal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+        <div class="bg-white rounded-3xl border border-skysoft-200 shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-fade-in">
+            
+            <div class="bg-gradient-to-l from-skysoft-700 to-skysoft-500 text-white px-6 py-4 flex items-center justify-between shrink-0">
+                <div class="flex items-center gap-2.5">
+                    <i class="fa-solid fa-user-shield text-xl"></i>
+                    <h2 class="text-lg font-bold">פאנל ניהול מערכת והרשאות (מסונכרן בענן)</h2>
+                </div>
+                <button onclick="closeAdminModal()" class="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center cursor-pointer">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- לשוניות ניהול -->
+            <div class="flex border-b border-skysoft-200 bg-skysoft-50 px-4 pt-2 gap-2 shrink-0 overflow-x-auto">
+                <button onclick="switchAdminTab('users')" id="tab-btn-users"
+                    class="px-4 py-2.5 rounded-t-xl font-bold text-sm bg-white text-skysoft-700 border-t border-x border-skysoft-200 cursor-pointer">
+                    <i class="fa-solid fa-users ml-1.5"></i>משתמשים והרשאות
+                </button>
+                <button onclick="switchAdminTab('options')" id="tab-btn-options"
+                    class="px-4 py-2.5 rounded-t-xl font-semibold text-sm text-slate-600 hover:text-skysoft-700 cursor-pointer">
+                    <i class="fa-solid fa-list-check ml-1.5"></i>רשימות בחירה
+                </button>
+                <button onclick="switchAdminTab('fields')" id="tab-btn-fields"
+                    class="px-4 py-2.5 rounded-t-xl font-semibold text-sm text-slate-600 hover:text-skysoft-700 cursor-pointer">
+                    <i class="fa-solid fa-table-columns ml-1.5"></i>הוספת עמודות/שדות
+                </button>
+            </div>
+
+            <!-- תוכן לשוניות הניהול -->
+            <div class="p-5 sm:p-6 overflow-y-auto flex-1 space-y-6">
+                
+                <!-- 1. ניהול משתמשים -->
+                <div id="admin-tab-users" class="space-y-5">
+                    <form onsubmit="handleAddUser(event)" class="bg-skysoft-50/70 border border-skysoft-200 rounded-2xl p-4 space-y-3">
+                        <h3 class="font-bold text-skysoft-900 text-sm flex items-center gap-2">
+                            <i class="fa-solid fa-user-plus text-skysoft-600"></i>
+                            הוספת משתמש חדש למערכת
+                        </h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                            <input type="text" id="new-user-name" required placeholder="שם משתמש (לכניסה)"
+                                class="p-2.5 bg-white border border-skysoft-200 rounded-xl text-sm">
+                            <input type="text" id="new-user-pass" required placeholder="סיסמה"
+                                class="p-2.5 bg-white border border-skysoft-200 rounded-xl text-sm">
+                            <select id="new-user-role" class="p-2.5 bg-white border border-skysoft-200 rounded-xl text-sm font-medium">
+                                <option value="user">משתמש רגיל</option>
+                                <option value="admin">מנהל מערכת</option>
+                            </select>
+                            <button type="submit" class="py-2.5 px-4 bg-skysoft-600 hover:bg-skysoft-700 text-white font-bold rounded-xl text-sm transition cursor-pointer">
+                                + הוסף משתמש
+                            </button>
+                        </div>
+                    </form>
+
+                    <div>
+                        <h3 class="font-bold text-skysoft-900 text-sm mb-2.5">משתמשים קיימים והרשאות (ניתן לערוך סיסמה או הרשאה):</h3>
+                        <div id="admin-users-list" class="space-y-2">
+                            <!-- רשימת משתמשים דינמית -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. ניהול אפשרויות בחירה -->
+                <div id="admin-tab-options" class="hidden grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-skysoft-50/60 border border-skysoft-200 rounded-2xl p-4 space-y-3">
+                        <h3 class="font-bold text-skysoft-900 text-sm">אפשרויות בעמודת "סוג הפניה"</h3>
+                        <div class="flex gap-2">
+                            <input type="text" id="new-type-option" placeholder="הוסף סוג פניה חדש..."
+                                class="flex-1 p-2.5 bg-white border border-skysoft-200 rounded-xl text-sm">
+                            <button type="button" onclick="addDropdownOption('ticketTypes', 'new-type-option')"
+                                class="px-4 py-2 bg-skysoft-600 text-white font-bold rounded-xl text-sm cursor-pointer">הוסף</button>
+                        </div>
+                        <ul id="list-ticketTypes" class="space-y-1.5 max-h-60 overflow-y-auto"></ul>
+                    </div>
+
+                    <div class="bg-skysoft-50/60 border border-skysoft-200 rounded-2xl p-4 space-y-3">
+                        <h3 class="font-bold text-skysoft-900 text-sm">שמות בעמודת "טופל על ידי"</h3>
+                        <div class="flex gap-2">
+                            <input type="text" id="new-handler-option" placeholder="הוסף שם נציג..."
+                                class="flex-1 p-2.5 bg-white border border-skysoft-200 rounded-xl text-sm">
+                            <button type="button" onclick="addDropdownOption('handlers', 'new-handler-option')"
+                                class="px-4 py-2 bg-skysoft-600 text-white font-bold rounded-xl text-sm cursor-pointer">הוסף</button>
+                        </div>
+                        <ul id="list-handlers" class="space-y-1.5 max-h-60 overflow-y-auto"></ul>
+                    </div>
+                </div>
+
+                <!-- 3. הוספת עמודות מותאמות אישית -->
+                <div id="admin-tab-fields" class="hidden space-y-5">
+                    <form onsubmit="handleAddCustomField(event)" class="bg-skysoft-50/70 border border-skysoft-200 rounded-2xl p-4 space-y-3">
+                        <h3 class="font-bold text-skysoft-900 text-sm">הוספת עמודה חדשה לטבלת הפניות</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <input type="text" id="new-field-label" required placeholder="שם העמודה (לדוגמה: דגם מכשיר / טלפון)"
+                                class="p-2.5 bg-white border border-skysoft-200 rounded-xl text-sm">
+                            <select id="new-field-type" class="p-2.5 bg-white border border-skysoft-200 rounded-xl text-sm">
+                                <option value="text">טקסט קצר</option>
+                                <option value="textarea">טקסט מתרחב</option>
+                                <option value="number">מספר</option>
+                            </select>
+                            <button type="submit" class="py-2.5 px-4 bg-skysoft-600 hover:bg-skysoft-700 text-white font-bold rounded-xl text-sm cursor-pointer">
+                                + הוסף עמודה לטבלה
+                            </button>
+                        </div>
+                    </form>
+
+                    <div>
+                        <h3 class="font-bold text-skysoft-900 text-sm mb-2">עמודות נוספות שהוגדרו:</h3>
+                        <div id="custom-fields-list" class="space-y-2"></div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== חלון אישור מחיקה מותאם (במקום confirm) ==================== -->
+    <div id="confirm-modal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl border border-skysoft-200 shadow-xl max-w-sm w-full p-6 text-center space-y-4 animate-fade-in">
+            <div class="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto text-xl">
+                <i class="fa-solid fa-trash-can"></i>
+            </div>
+            <h3 class="text-lg font-bold text-slate-900" id="confirm-title">אישור מחיקה</h3>
+            <p class="text-sm text-slate-600" id="confirm-message">האם אתה בטוח שברצונך למחוק רשומה זו?</p>
+            <div class="flex gap-3 pt-2">
+                <button onclick="closeConfirmModal()" class="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm cursor-pointer">
+                    ביטול
+                </button>
+                <button id="confirm-yes-btn" class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-sm cursor-pointer">
+                    כן, מחק
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- הודעת Toast צפה למשוב מהיר -->
+    <div id="toast" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 hidden bg-skysoft-900 text-white px-5 py-3 rounded-2xl shadow-lg text-sm font-medium flex items-center gap-2.5 transition-all">
+        <i id="toast-icon" class="fa-solid fa-circle-check text-skysoft-300"></i>
+        <span id="toast-text"></span>
+    </div>
+
+    <!-- ==================== לוגיקת המערכת וסנכרון FIREBASE בזמן אמת ==================== -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import {
+            getFirestore,
+            doc,
+            getDoc,
+            setDoc,
+            updateDoc,
+            deleteDoc,
+            onSnapshot,
+            collection,
+            runTransaction
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // אתחול תצורת Firebase מהסביבה
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'garage-crm-default';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+
+        let app = null;
+        let auth = null;
+        let db = null;
+        let firebaseUser = null;
+
+        // נתיבי Firestore ציבוריים משותפים לכל המכשירים (Android, iOS, Windows)
+        // RULE 1: /artifacts/{appId}/public/data/{collectionName}
+        const getTicketsCol = () => collection(db, 'artifacts', appId, 'public', 'data', 'tickets');
+        const getTicketDoc = (id) => doc(db, 'artifacts', appId, 'public', 'data', 'tickets', String(id));
+        const getUsersCol = () => collection(db, 'artifacts', appId, 'public', 'data', 'crm_users');
+        const getUserDoc = (id) => doc(db, 'artifacts', appId, 'public', 'data', 'crm_users', String(id));
+        const getSettingsDoc = () => doc(db, 'artifacts', appId, 'public', 'data', 'crm_config', 'settings');
+        const getCounterDoc = (yyyymm) => doc(db, 'artifacts', appId, 'public', 'data', 'crm_counters', String(yyyymm));
+
+        // נתוני ברירת מחדל
+        const DEFAULT_USERS = [
+            { id: 'u_ilan', username: 'אילן', password: '1234', role: 'admin' },
+            { id: 'u_alina', username: 'אלינה', password: '1234', role: 'user' },
+            { id: 'u_office', username: 'משרד', password: '1234', role: 'user' }
+        ];
+
+        const DEFAULT_OPTIONS = {
+            ticketTypes: ['תקלה במכשיר', 'בעיית תפעול', 'תקלה ברכב', 'רכישה', 'אחר'],
+            handlers: ['אילן', 'אלינה', 'משרד', 'אחר']
+        };
+
+        const SAMPLE_TICKETS = [
+            {
+                id: '2026110001',
+                openDate: '25/11/2026',
+                openTime: '08:30',
+                callerName: 'דוד כהן',
+                garageName: 'מוסך המומחים בע״מ',
+                ticketType: 'תקלה במכשיר',
+                request: 'מכשיר דיאגנוסטיקה לא מתחבר לשקע OBD ברכב מסחרי, נדלקת נורה אדומה בראש הכבל.',
+                solution: 'בוצע איפוס חומרה מרחוק ועדכון קושחה לגרסה האחרונה. התקשורת חזרה לפעול באופן תקין.',
+                closeDate: '25/11/2026',
+                closeTime: '10:45',
+                handledBy: 'אילן',
+                customValues: {},
+                createdAt: 1795588200000
+            },
+            {
+                id: '2026110002',
+                openDate: '25/11/2026',
+                openTime: '11:15',
+                callerName: 'רוני לוי',
+                garageName: 'מרכז שירות הצפון',
+                ticketType: 'בעיית תפעול',
+                request: 'מבקש הדרכה קצרה על ביצוע כיול חיישן זווית הגה (SAS) לאחר כיוון פרונט.',
+                solution: 'נשלח מדריך מצולם בוואטסאפ ובוצע הסבר טלפוני צעד אחר צעד עד להשלמת הכיול.',
+                closeDate: '25/11/2026',
+                closeTime: '11:50',
+                handledBy: 'אלינה',
+                customValues: {},
+                createdAt: 1795598100000
+            },
+            {
+                id: '2026110003',
+                openDate: '25/11/2026',
+                openTime: '14:20',
+                callerName: 'יוסי מזרחי',
+                garageName: 'מוסך הגליל',
+                ticketType: 'רכישה',
+                request: 'מעוניין בהצעת מחיר לחידוש מנוי עדכוני תוכנה שנתי + מתאם 12+8 לרכבי קרייזלר.',
+                solution: '',
+                closeDate: '',
+                closeTime: '',
+                handledBy: 'משרד',
+                customValues: {},
+                createdAt: 1795609200000
+            }
+        ];
+
+        // מצב אפליקציה בזיכרון
+        const state = {
+            currentUser: null,
+            users: [...DEFAULT_USERS],
+            tickets: [],
+            options: JSON.parse(JSON.stringify(DEFAULT_OPTIONS)),
+            customFields: [],
+            statusFilter: 'ALL',
+            viewMode: window.innerWidth < 768 ? 'cards' : 'table',
+            activeAccessTicketId: null,
+            isSynced: false
+        };
+
+        const SESSION_KEY = 'crm_garage_active_user_id_v2';
+
+        // ==================== אתחול ואימות FIREBASE ====================
+        async function initCloudSync() {
+            updateLiveClock();
+            setInterval(updateLiveClock, 30000);
+            renderQuickLoginButtons();
+
+            if (!firebaseConfig) {
+                setSyncIndicator('error', 'חסרה תצורת ענן');
+                return;
+            }
+
+            try {
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // RULE 3: התחברות ואימות לפני כל גישה ל-Firestore
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                firebaseUser = auth.currentUser;
+                if (!firebaseUser) {
+                    await new Promise(resolve => {
+                        const unsub = onAuthStateChanged(auth, (u) => {
+                            if (u) {
+                                firebaseUser = u;
+                                unsub();
+                                resolve();
+                            }
+                        });
+                    });
+                }
+
+                setSyncIndicator('online', 'מחובר ומסונכרן בזמן אמת');
+                await seedInitialDataIfNeeded();
+                startRealtimeListeners();
+            } catch (err) {
+                console.error('Firebase Init Error:', err);
+                setSyncIndicator('error', 'שגיאת חיבור לענן');
+            }
+        }
+
+        function setSyncIndicator(status, text) {
+            // עדכון במסך כניסה
+            const loginDot = document.getElementById('login-sync-dot');
+            const loginText = document.getElementById('login-sync-text');
+            if (loginText) loginText.textContent = text;
+            if (loginDot) {
+                loginDot.innerHTML = status === 'online'
+                    ? `<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>`
+                    : `<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>`;
+            }
+
+            // עדכון בסרגל העליון במערכת
+            const badge = document.getElementById('sync-status-badge');
+            const ping = document.getElementById('sync-ping');
+            const dot = document.getElementById('sync-dot');
+            const label = document.getElementById('sync-label');
+
+            if (badge && label && ping && dot) {
+                label.textContent = text;
+                if (status === 'online') {
+                    badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold';
+                    ping.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75';
+                    dot.className = 'relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500';
+                } else if (status === 'saving') {
+                    badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-skysoft-50 border border-skysoft-200 text-skysoft-700 text-xs font-bold';
+                    ping.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-skysoft-400 opacity-75';
+                    dot.className = 'relative inline-flex rounded-full h-2.5 w-2.5 bg-skysoft-500';
+                } else {
+                    badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-50 border border-red-200 text-red-700 text-xs font-bold';
+                    ping.className = 'hidden';
+                    dot.className = 'relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500';
+                }
+            }
+        }
+
+        // אתחול נתוני ברירת מחדל בענן אם המערכת ריקה לחלוטין בהפעלה ראשונה
+        async function seedInitialDataIfNeeded() {
+            if (!firebaseUser) return;
+            try {
+                const settingsSnap = await getDoc(getSettingsDoc());
+                if (!settingsSnap.exists()) {
+                    await setDoc(getSettingsDoc(), {
+                        options: DEFAULT_OPTIONS,
+                        customFields: [],
+                        initialized: true
+                    });
+
+                    for (const u of DEFAULT_USERS) {
+                        await setDoc(getUserDoc(u.id), u);
+                    }
+
+                    for (const t of SAMPLE_TICKETS) {
+                        await setDoc(getTicketDoc(t.id), t);
+                    }
+
+                    await setDoc(getCounterDoc('202611'), { lastSeq: 3 });
+                }
+            } catch (err) {
+                console.error('Seed Error:', err);
+            }
+        }
+
+        // מאזינים בזמן אמת (onSnapshot) לכל אוספי הנתונים
+        function startRealtimeListeners() {
+            if (!firebaseUser) return;
+
+            // 1. האזנה בזמן אמת לפניות הלקוחות
+            onSnapshot(getTicketsCol(), (snapshot) => {
+                const list = [];
+                snapshot.forEach(docSnap => {
+                    list.push(docSnap.data());
+                });
+
+                // מיון בזיכרון (RULE 2: ללא orderBy בשאילתה) - מהחדשה לישנה לפי מספר פניה
+                list.sort((a, b) => String(b.id).localeCompare(String(a.id)));
+                state.tickets = list;
+                state.isSynced = true;
+
+                populateMonthFilters();
+                
+                // מניעת דריסת שדה שהמשתמש מקליד בו כרגע באותו מכשיר
+                const activeEl = document.activeElement;
+                const isEditingCell = activeEl && activeEl.dataset && activeEl.dataset.liveEdit === 'true';
+                if (!isEditingCell) {
+                    renderTable();
+                } else {
+                    updateStats();
+                }
+
+                if (state.activeAccessTicketId) {
+                    const activeAccessEl = document.activeElement;
+                    const isEditingModal = activeAccessEl && activeAccessEl.closest('#access-form-modal');
+                    if (!isEditingModal) {
+                        renderAccessFormContent(state.activeAccessTicketId);
+                    }
+                }
+            }, (error) => {
+                console.error('Tickets onSnapshot error:', error);
+                setSyncIndicator('error', 'ניתוק זמני מהענן');
+            });
+
+            // 2. האזנה בזמן אמת למשתמשים והרשאות
+            onSnapshot(getUsersCol(), (snapshot) => {
+                const usersList = [];
+                snapshot.forEach(docSnap => {
+                    usersList.push(docSnap.data());
+                });
+                if (usersList.length > 0) {
+                    state.users = usersList;
+                }
+                renderQuickLoginButtons();
+
+                // בדיקה אם המשתמש הנוכחי מחובר ועדכון הרשאותיו בזמן אמת
+                const savedUserId = sessionStorage.getItem(SESSION_KEY);
+                if (savedUserId) {
+                    const found = state.users.find(u => u.id === savedUserId);
+                    if (found) {
+                        if (!state.currentUser) {
+                            loginSuccess(found, true);
+                        } else {
+                            state.currentUser = found;
+                            applyRoleUI();
+                        }
+                    } else if (state.currentUser) {
+                        logout();
+                    }
+                }
+
+                if (!document.getElementById('admin-modal').classList.contains('hidden')) {
+                    renderAdminUsers();
+                }
+            }, (error) => {
+                console.error('Users onSnapshot error:', error);
+            });
+
+            // 3. האזנה בזמן אמת להגדרות מערכת (רשימות בחירה ועמודות מותאמות)
+            onSnapshot(getSettingsDoc(), (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    if (data.options) state.options = data.options;
+                    if (data.customFields) state.customFields = data.customFields;
+
+                    if (state.currentUser) {
+                        renderTable();
+                    }
+                    if (!document.getElementById('admin-modal').classList.contains('hidden')) {
+                        renderAdminOptions();
+                        renderAdminCustomFields();
+                    }
+                }
+            }, (error) => {
+                console.error('Settings onSnapshot error:', error);
+            });
+        }
+
+        // ==================== ניהול התחברות והרשאות ====================
+        function renderQuickLoginButtons() {
+            const container = document.getElementById('quick-login-buttons');
+            if (!container) return;
+            container.innerHTML = state.users.slice(0, 6).map(u => `
+                <button type="button" onclick="quickLogin('${escapeHtml(u.username)}', '${escapeHtml(u.password)}')"
+                    class="py-2 px-2 bg-skysoft-50 hover:bg-skysoft-100 border border-skysoft-200 rounded-xl text-xs font-bold text-skysoft-800 flex flex-col items-center gap-0.5 transition cursor-pointer">
+                    <span>${escapeHtml(u.username)}</span>
+                    <span class="text-[10px] font-normal ${u.role === 'admin' ? 'text-skysoft-600' : 'text-slate-500'}">
+                        ${u.role === 'admin' ? 'מנהל' : 'משתמש'}
+                    </span>
+                </button>
+            `).join('');
+        }
+
+        window.quickLogin = function(username, password) {
+            document.getElementById('login-username').value = username;
+            document.getElementById('login-password').value = password;
+            const user = state.users.find(u => u.username.trim() === username.trim() && u.password === password);
+            if (user) loginSuccess(user, false);
+        };
+
+        document.getElementById('login-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const username = document.getElementById('login-username').value.trim();
+            const password = document.getElementById('login-password').value;
+            const errorBox = document.getElementById('login-error');
+
+            const user = state.users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.password === password);
+            if (user) {
+                errorBox.classList.add('hidden');
+                loginSuccess(user, false);
+            } else {
+                errorBox.classList.remove('hidden');
+            }
+        });
+
+        function loginSuccess(user, isAutoRestore) {
+            state.currentUser = user;
+            sessionStorage.setItem(SESSION_KEY, user.id);
+
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('app-screen').classList.remove('hidden');
+
+            applyRoleUI();
+            populateMonthFilters();
+            setViewMode(state.viewMode);
+            renderTable();
+
+            if (!isAutoRestore) {
+                showToast(`ברוך הבא, ${user.username}! המערכת מסונכרנת בזמן אמת`);
+            }
+        }
+
+        function applyRoleUI() {
+            const user = state.currentUser;
+            if (!user) return;
+            document.getElementById('current-user-name').textContent = user.username;
+            const badge = document.getElementById('role-badge');
+            const admin = user.role === 'admin';
+
+            badge.textContent = admin ? 'מנהל מערכת' : 'נציג שירות';
+            badge.className = admin
+                ? 'text-xs font-bold px-2.5 py-0.5 rounded-full bg-skysoft-600 text-white'
+                : 'text-xs font-bold px-2.5 py-0.5 rounded-full bg-skysoft-100 text-skysoft-700';
+
+            document.getElementById('btn-export-modal').classList.toggle('hidden', !admin);
+            document.getElementById('btn-admin-modal').classList.toggle('hidden', !admin);
+        }
+
+        window.logout = function() {
+            state.currentUser = null;
+            sessionStorage.removeItem(SESSION_KEY);
+            document.getElementById('app-screen').classList.add('hidden');
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('login-password').value = '';
+            renderQuickLoginButtons();
+        };
+
+        function isAdmin() {
+            return state.currentUser && state.currentUser.role === 'admin';
+        }
+
+        // ==================== מספור אוטומטי אטומי YYYYMM0001 (ללא התנגשויות) ====================
+        function getCurrentDateTimeParts() {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+
+            return {
+                year,
+                month,
+                day,
+                prefix: `${year}${month}`, // לדוגמה: 202611 ובדצמבר 202612
+                dateStr: `${day}/${month}/${year}`,
+                timeStr: `${hours}:${minutes}`
+            };
+        }
+
+        // שימוש ב-Transaction של Firestore כדי להבטיח ששני נציגים שפותחים פניה באותה שנייה יקבלו מספרים עוקבים ללא כפילות
+        window.createNewTicketRow = async function() {
+            if (!firebaseUser) {
+                showToast('ממתין לחיבור לענן...');
+                return;
+            }
+
+            setSyncIndicator('saving', 'פותח פניה חדשה בענן...');
+            const { prefix, dateStr, timeStr } = getCurrentDateTimeParts();
+
+            // חישוב מספר מקסימלי קיים בזיכרון כגיבוי לסנכרון המונה
+            let memoryMaxSeq = 0;
+            state.tickets.forEach(t => {
+                if (String(t.id).startsWith(prefix)) {
+                    const seqPart = parseInt(String(t.id).slice(6), 10);
+                    if (!isNaN(seqPart) && seqPart > memoryMaxSeq) {
+                        memoryMaxSeq = seqPart;
+                    }
+                }
+            });
+
+            const defaultHandler = state.options.handlers.includes(state.currentUser.username)
+                ? state.currentUser.username
+                : (state.options.handlers[0] || 'אחר');
+
+            try {
+                const counterRef = getCounterDoc(prefix);
+                const generatedId = await runTransaction(db, async (transaction) => {
+                    const counterSnap = await transaction.get(counterRef);
+                    let currentSeq = memoryMaxSeq;
+
+                    if (counterSnap.exists() && typeof counterSnap.data().lastSeq === 'number') {
+                        currentSeq = Math.max(currentSeq, counterSnap.data().lastSeq);
+                    }
+
+                    const nextSeq = currentSeq + 1;
+                    const newTicketId = `${prefix}${String(nextSeq).padStart(4, '0')}`;
+
+                    const newTicket = {
+                        id: newTicketId,
+                        openDate: dateStr,
+                        openTime: timeStr,
+                        callerName: '',
+                        garageName: '',
+                        ticketType: state.options.ticketTypes[0] || 'תקלה במכשיר',
+                        request: '',
+                        solution: '',
+                        closeDate: '',
+                        closeTime: '',
+                        handledBy: defaultHandler,
+                        customValues: {},
+                        createdAt: Date.now()
+                    };
+
+                    transaction.set(counterRef, { lastSeq: nextSeq }, { merge: true });
+                    transaction.set(getTicketDoc(newTicketId), newTicket);
+                    return newTicketId;
+                });
+
+                setSyncIndicator('online', 'מחובר ומסונכרן בזמן אמת');
+                showToast(`נפתחה פניה חדשה מספר ${generatedId}`);
+
+                setTimeout(() => {
+                    const firstInput = document.querySelector(`[data-ticket-id="${generatedId}"][data-field="callerName"]`);
+                    if (firstInput) firstInput.focus();
+                }, 150);
+            } catch (err) {
+                console.error('Error creating ticket with transaction:', err);
+                setSyncIndicator('error', 'שגיאה בפתיחת פניה');
+                showToast('אירעה שגיאה בפתיחת הפניה, נסה שוב');
+            }
+        };
+
+        // ==================== חישוב זמנים ועדכון שדות בזמן אמת ====================
+        function calculateDuration(openDate, openTime, closeDate, closeTime) {
+            if (!openDate || !openTime || !closeDate || !closeTime) {
+                return '';
+            }
+
+            const start = parseDateTime(openDate, openTime);
+            const end = parseDateTime(closeDate, closeTime);
+
+            if (!start || !end || isNaN(start.getTime()) || isNaN(end.getTime())) {
+                return 'תאריך לא תקין';
+            }
+
+            const diffMs = end.getTime() - start.getTime();
+            if (diffMs < 0) {
+                return '0 ימים, 0 שעות';
+            }
+
+            const totalMinutes = Math.floor(diffMs / (1000 * 60));
+            const totalHoursFloat = diffMs / (1000 * 60 * 60);
+            const days = Math.floor(totalHoursFloat / 24);
+            const remainingHours = Math.floor(totalHoursFloat % 24);
+            const remainingMinutes = totalMinutes % 60;
+
+            if (days === 0 && remainingHours === 0) {
+                return `0 ימים, 0 שעות (${remainingMinutes} דק׳)`;
+            }
+            if (remainingMinutes > 0 && days === 0) {
+                return `${days} ימים, ${remainingHours} שעות ו-${remainingMinutes} דק׳`;
+            }
+            return `${days} ימים, ${remainingHours} שעות`;
+        }
+
+        function parseDateTime(dateStr, timeStr) {
+            const dParts = String(dateStr).split('/');
+            const tParts = String(timeStr).split(':');
+            if (dParts.length !== 3 || tParts.length < 2) return null;
+            return new Date(
+                parseInt(dParts[2], 10),
+                parseInt(dParts[1], 10) - 1,
+                parseInt(dParts[0], 10),
+                parseInt(tParts[0], 10),
+                parseInt(tParts[1], 10)
+            );
+        }
+
+        function updateLiveClock() {
+            const el = document.getElementById('live-clock');
+            if (!el) return;
+            const { dateStr, timeStr } = getCurrentDateTimeParts();
+            el.textContent = `${dateStr} | ${timeStr}`;
+        }
+
+        // מנגנון Debounce לשמירה חלקה ומהירה לענן בזמן הקלדה
+        const saveTimers = {};
+        window.handleLiveFieldInput = function(ticketId, field, value, isCustom = false) {
+            const ticket = state.tickets.find(t => t.id === ticketId);
+            if (ticket) {
+                if (isCustom) {
+                    if (!ticket.customValues) ticket.customValues = {};
+                    ticket.customValues[field] = value;
+                } else {
+                    ticket[field] = value;
+                }
+            }
+
+            const timerKey = `${ticketId}_${field}`;
+            clearTimeout(saveTimers[timerKey]);
+            setSyncIndicator('saving', 'שומר שינויים בענן...');
+
+            saveTimers[timerKey] = setTimeout(() => {
+                persistTicketUpdate(ticketId, field, value, isCustom);
+            }, 400);
+        };
+
+        window.updateTicketField = async function(ticketId, field, value, isCustom = false) {
+            const timerKey = `${ticketId}_${field}`;
+            clearTimeout(saveTimers[timerKey]);
+            await persistTicketUpdate(ticketId, field, value, isCustom);
+        };
+
+        async function persistTicketUpdate(ticketId, field, value, isCustom) {
+            if (!firebaseUser) return;
+            try {
+                setSyncIndicator('saving', 'שומר שינויים בענן...');
+                const updatePayload = isCustom
+                    ? { [`customValues.${field}`]: value }
+                    : { [field]: value };
+
+                await updateDoc(getTicketDoc(ticketId), updatePayload);
+                setSyncIndicator('online', 'מחובר ומסונכרן בזמן אמת');
+            } catch (err) {
+                console.error('Error updating ticket:', err);
+                setSyncIndicator('error', 'שגיאה בשמירה');
+            }
+        }
+
+        // לחיצה על תאריך/שעת סגירה (עמודות 9 ו-10) - מילוי אוטומטי וסנכרון לענן
+        window.stampClosingField = async function(ticketId, fieldType) {
+            if (!firebaseUser) return;
+            const ticket = state.tickets.find(t => t.id === ticketId);
+            if (!ticket) return;
+
+            const { dateStr, timeStr } = getCurrentDateTimeParts();
+            const updates = {};
+
+            if (fieldType === 'closeDate') {
+                updates.closeDate = dateStr;
+                if (!ticket.closeTime) updates.closeTime = timeStr;
+            } else if (fieldType === 'closeTime') {
+                updates.closeTime = timeStr;
+                if (!ticket.closeDate) updates.closeDate = dateStr;
+            }
+
+            try {
+                setSyncIndicator('saving', 'מעדכן סגירת פניה...');
+                await updateDoc(getTicketDoc(ticketId), updates);
+                setSyncIndicator('online', 'מחובר ומסונכרן בזמן אמת');
+                showToast(`עודכן מועד סגירה לפניה ${ticketId}`);
+            } catch (err) {
+                console.error('Error stamping close:', err);
+                setSyncIndicator('error', 'שגיאה בעדכון');
+            }
+        };
+
+        // איפוס תאריך סגירה (מנהל בלבד)
+        window.clearClosingFields = async function(ticketId) {
+            if (!isAdmin() || !firebaseUser) return;
+            try {
+                setSyncIndicator('saving', 'מאפס מועד סגירה...');
+                await updateDoc(getTicketDoc(ticketId), {
+                    closeDate: '',
+                    closeTime: ''
+                });
+                setSyncIndicator('online', 'מחובר ומסונכרן בזמן אמת');
+                showToast(`אופס מועד סגירה לפניה ${ticketId}`);
+            } catch (err) {
+                console.error('Error clearing close:', err);
+            }
+        };
+
+        window.promptDeleteTicket = function(ticketId) {
+            if (!isAdmin()) return;
+            document.getElementById('confirm-title').textContent = `מחיקת פניה ${ticketId}`;
+            document.getElementById('confirm-message').textContent = 'האם אתה בטוח שברצונך למחוק לצמיתות פניה זו מכל המכשירים?';
+            const yesBtn = document.getElementById('confirm-yes-btn');
+            yesBtn.onclick = async () => {
+                if (!firebaseUser) return;
+                try {
+                    setSyncIndicator('saving', 'מוחק רשומה...');
+                    await deleteDoc(getTicketDoc(ticketId));
+                    if (state.activeAccessTicketId === ticketId) {
+                        closeAccessFormModal();
+                    }
+                    closeConfirmModal();
+                    setSyncIndicator('online', 'מחובר ומסונכרן בזמן אמת');
+                    showToast(`פניה ${ticketId} נמחקה`);
+                } catch (err) {
+                    console.error('Error deleting ticket:', err);
+                }
+            };
+            document.getElementById('confirm-modal').classList.remove('hidden');
+        };
+
+        window.closeConfirmModal = function() {
+            document.getElementById('confirm-modal').classList.add('hidden');
+        };
+
+        // הרחבה אוטומטית של תיבות הטקסט (עמודות 7 ו-8)
+        window.autoResizeTextarea = function(el) {
+            if (!el) return;
+            el.style.height = 'auto';
+            el.style.height = Math.max(44, el.scrollHeight) + 'px';
+        };
+
+        function resizeAllTextareas() {
+            document.querySelectorAll('textarea.auto-expand').forEach(window.autoResizeTextarea);
+        }
+
+        // ==================== תצוגת טופס פרטני בסגנון ACCESS ====================
+        window.openAccessFormModal = function(ticketId) {
+            state.activeAccessTicketId = ticketId;
+            renderAccessFormContent(ticketId);
+            document.getElementById('access-form-modal').classList.remove('hidden');
+            requestAnimationFrame(resizeAllTextareas);
+        };
+
+        window.closeAccessFormModal = function() {
+            state.activeAccessTicketId = null;
+            document.getElementById('access-form-modal').classList.add('hidden');
+            renderTable();
+        };
+
+        window.navigateAccessForm = function(direction) {
+            const filtered = getFilteredTickets();
+            const currentIndex = filtered.findIndex(t => t.id === state.activeAccessTicketId);
+            if (currentIndex === -1) return;
+            const nextIndex = currentIndex + direction;
+            if (nextIndex >= 0 && nextIndex < filtered.length) {
+                openAccessFormModal(filtered[nextIndex].id);
+            } else {
+                showToast('הגעת לקצה הרשימה');
+            }
+        };
+
+        function renderAccessFormContent(ticketId) {
+            const t = state.tickets.find(item => item.id === ticketId);
+            if (!t) return;
+
+            const admin = isAdmin();
+            const isClosed = Boolean(t.closeDate && t.closeTime);
+            const duration = calculateDuration(t.openDate, t.openTime, t.closeDate, t.closeTime);
+
+            document.getElementById('access-modal-id').textContent = t.id;
+            document.getElementById('access-modal-meta').textContent = `נפתח בתאריך ${t.openDate} בשעה ${t.openTime}`;
+
+            const typeOptionsHtml = state.options.ticketTypes.map(opt =>
+                `<option value="${escapeHtml(opt)}" ${t.ticketType === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>`
+            ).join('');
+
+            const handlerOptionsHtml = state.options.handlers.map(opt =>
+                `<option value="${escapeHtml(opt)}" ${t.handledBy === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>`
+            ).join('');
+
+            const customFieldsHtml = state.customFields.map(cf => {
+                const val = (t.customValues && t.customValues[cf.id]) || '';
+                return `
+                    <div>
+                        <label class="block text-xs font-bold text-skysoft-800 mb-1">${escapeHtml(cf.label)}</label>
+                        ${cf.type === 'textarea'
+                            ? `<textarea rows="2" oninput="autoResizeTextarea(this); handleLiveFieldInput('${t.id}', '${cf.id}', this.value, true)"
+                                 onchange="updateTicketField('${t.id}', '${cf.id}', this.value, true)"
+                                 class="auto-expand w-full p-3 bg-skysoft-50/60 border border-skysoft-200 rounded-2xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-skysoft-400">${escapeHtml(val)}</textarea>`
+                            : `<input type="${cf.type === 'number' ? 'number' : 'text'}" value="${escapeHtml(val)}"
+                                 oninput="handleLiveFieldInput('${t.id}', '${cf.id}', this.value, true)"
+                                 onchange="updateTicketField('${t.id}', '${cf.id}', this.value, true)"
+                                 class="w-full p-3 bg-skysoft-50/60 border border-skysoft-200 rounded-2xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-skysoft-400">`
+                        }
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('access-form-body').innerHTML = `
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                        <label class="block text-xs font-bold text-skysoft-800 mb-1">4. שם הפונה</label>
+                        <input type="text" value="${escapeHtml(t.callerName)}" placeholder="הקלד שם הפונה..."
+                            oninput="handleLiveFieldInput('${t.id}', 'callerName', this.value)"
+                            onchange="updateTicketField('${t.id}', 'callerName', this.value)"
+                            class="w-full p-3 bg-skysoft-50/60 border border-skysoft-200 rounded-2xl text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-skysoft-400">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-skysoft-800 mb-1">5. שם המוסך</label>
+                        <input type="text" value="${escapeHtml(t.garageName)}" placeholder="הקלד שם המוסך..."
+                            oninput="handleLiveFieldInput('${t.id}', 'garageName', this.value)"
+                            onchange="updateTicketField('${t.id}', 'garageName', this.value)"
+                            class="w-full p-3 bg-skysoft-50/60 border border-skysoft-200 rounded-2xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-skysoft-400">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                        <label class="block text-xs font-bold text-skysoft-800 mb-1">6. סוג הפניה</label>
+                        <select onchange="updateTicketField('${t.id}', 'ticketType', this.value)"
+                            class="w-full p-3 bg-skysoft-50 border border-skysoft-200 rounded-2xl text-sm font-semibold text-skysoft-900 focus:outline-none focus:ring-2 focus:ring-skysoft-400">
+                            ${typeOptionsHtml}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-skysoft-800 mb-1">11. טופל על ידי</label>
+                        <select onchange="updateTicketField('${t.id}', 'handledBy', this.value)"
+                            class="w-full p-3 bg-skysoft-50 border border-skysoft-200 rounded-2xl text-sm font-semibold text-skysoft-900 focus:outline-none focus:ring-2 focus:ring-skysoft-400">
+                            ${handlerOptionsHtml}
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-skysoft-800 mb-1">7. בקשת לקוח</label>
+                    <textarea rows="3" placeholder="תיאור מפורט של בקשת הלקוח..."
+                        oninput="autoResizeTextarea(this); handleLiveFieldInput('${t.id}', 'request', this.value)"
+                        onchange="updateTicketField('${t.id}', 'request', this.value)"
+                        class="auto-expand w-full p-3 bg-skysoft-50/60 border border-skysoft-200 rounded-2xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-skysoft-400">${escapeHtml(t.request)}</textarea>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-skysoft-800 mb-1">8. פתרון הבקשה</label>
+                    <textarea rows="3" placeholder="תיאור הפתרון שניתן ללקוח..."
+                        oninput="autoResizeTextarea(this); handleLiveFieldInput('${t.id}', 'solution', this.value)"
+                        onchange="updateTicketField('${t.id}', 'solution', this.value)"
+                        class="auto-expand w-full p-3 bg-skysoft-50/60 border border-skysoft-200 rounded-2xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-skysoft-400">${escapeHtml(t.solution)}</textarea>
+                </div>
+
+                ${customFieldsHtml}
+
+                <!-- אזור סגירת פניה וזמן טיפול -->
+                <div class="bg-skysoft-50/90 border border-skysoft-200 rounded-2xl p-4 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <div class="text-xs font-bold text-skysoft-900">9-10. מועד סגירת הפניה</div>
+                            <div class="text-sm font-mono text-slate-700 mt-0.5">
+                                ${isClosed ? `${escapeHtml(t.closeDate)} | שעה ${escapeHtml(t.closeTime)}` : 'טרם נסגרה'}
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button type="button" onclick="stampClosingField('${t.id}', 'closeDate')"
+                                class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center gap-1.5 shadow-2xs cursor-pointer">
+                                <i class="fa-solid fa-check-double"></i>
+                                <span>${isClosed ? 'עדכן סגירה לעכשיו' : 'סגור פניה עכשיו'}</span>
+                            </button>
+                            ${(isClosed && admin) ? `
+                                <button type="button" onclick="clearClosingFields('${t.id}')"
+                                    class="px-3 py-2.5 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-xl text-xs font-bold cursor-pointer">
+                                    אפס סגירה
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+
+                    <div class="pt-2 border-t border-skysoft-200/70 flex items-center justify-between">
+                        <span class="text-xs font-bold text-skysoft-800">12. זמן טיפול בפועל:</span>
+                        <span class="text-xs sm:text-sm font-bold text-skysoft-900 bg-white px-3 py-1 rounded-xl border border-skysoft-200">
+                            ${duration || 'ממתין לסגירה...'}
+                        </span>
+                    </div>
+                </div>
+
+                ${admin ? `
+                    <div class="pt-2 flex justify-end">
+                        <button type="button" onclick="promptDeleteTicket('${t.id}')"
+                            class="px-4 py-2 text-red-600 hover:bg-red-50 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
+                            <i class="fa-solid fa-trash-can"></i>
+                            <span>מחק רשומה זו לצמיתות</span>
+                        </button>
+                    </div>
+                ` : ''}
+            `;
+        }
+
+        // ==================== רינדור הטבלה והכרטיסיות ====================
+        window.setStatusFilter = function(status) {
+            state.statusFilter = status;
+            ['ALL', 'OPEN', 'CLOSED'].forEach(s => {
+                const btn = document.getElementById(`filter-${s}`);
+                if (s === status) {
+                    btn.className = 'flex-1 py-1.5 text-xs sm:text-sm font-bold rounded-lg bg-white text-skysoft-700 shadow-xs transition cursor-pointer';
+                } else {
+                    btn.className = 'flex-1 py-1.5 text-xs sm:text-sm font-semibold rounded-lg text-slate-600 hover:text-skysoft-700 transition cursor-pointer';
+                }
+            });
+            renderTable();
+        };
+
+        window.setViewMode = function(mode) {
+            state.viewMode = mode;
+            const tableBtn = document.getElementById('view-table-btn');
+            const cardsBtn = document.getElementById('view-cards-btn');
+            const tableContainer = document.getElementById('table-container');
+            const cardsContainer = document.getElementById('cards-container');
+
+            if (mode === 'table') {
+                tableBtn.className = 'px-2.5 py-1.5 rounded-lg bg-white text-skysoft-700 shadow-xs text-xs font-bold flex items-center gap-1 cursor-pointer';
+                cardsBtn.className = 'px-2.5 py-1.5 rounded-lg text-skysoft-700 text-xs font-semibold flex items-center gap-1 cursor-pointer';
+                tableContainer.classList.remove('hidden');
+                cardsContainer.classList.add('hidden');
+            } else {
+                cardsBtn.className = 'px-2.5 py-1.5 rounded-lg bg-white text-skysoft-700 shadow-xs text-xs font-bold flex items-center gap-1 cursor-pointer';
+                tableBtn.className = 'px-2.5 py-1.5 rounded-lg text-skysoft-700 text-xs font-semibold flex items-center gap-1 cursor-pointer';
+                tableContainer.classList.add('hidden');
+                cardsContainer.classList.remove('hidden');
+            }
+            renderTable();
+        };
+
+        function getFilteredTickets() {
+            const search = (document.getElementById('search-input')?.value || '').trim().toLowerCase();
+            const monthVal = document.getElementById('month-filter')?.value || 'ALL';
+
+            return state.tickets.filter(t => {
+                if (monthVal !== 'ALL' && !String(t.id).startsWith(monthVal)) {
+                    return false;
+                }
+
+                const isClosed = Boolean(t.closeDate && t.closeTime);
+                if (state.statusFilter === 'OPEN' && isClosed) return false;
+                if (state.statusFilter === 'CLOSED' && !isClosed) return false;
+
+                if (search) {
+                    const customStr = Object.values(t.customValues || {}).join(' ');
+                    const hay = `${t.id} ${t.openDate} ${t.callerName} ${t.garageName} ${t.ticketType} ${t.request} ${t.solution} ${t.handledBy} ${customStr}`.toLowerCase();
+                    if (!hay.includes(search)) return false;
+                }
+
+                return true;
+            });
+        }
+
+        function updateStats() {
+            const total = state.tickets.length;
+            const closed = state.tickets.filter(t => t.closeDate && t.closeTime).length;
+            const open = total - closed;
+
+            document.getElementById('stat-total').textContent = total;
+            document.getElementById('stat-open').textContent = open;
+            document.getElementById('stat-closed').textContent = closed;
+        }
+
+        window.renderTable = function() {
+            updateStats();
+            const filtered = getFilteredTickets();
+            const admin = isAdmin();
+
+            const headRow = document.getElementById('table-head-row');
+            let headersHtml = `
+                <th class="py-3 px-3 border-l border-skysoft-500/40 whitespace-nowrap sticky-col bg-skysoft-700 w-32">1. מספר פניה</th>
+                <th class="py-3 px-3 border-l border-skysoft-500/40 whitespace-nowrap w-28">2. תאריך פתיחה</th>
+                <th class="py-3 px-3 border-l border-skysoft-500/40 whitespace-nowrap w-20">3. שעה</th>
+                <th class="py-3 px-3 border-l border-skysoft-500/40 whitespace-nowrap w-36">4. שם הפונה</th>
+                <th class="py-3 px-3 border-l border-skysoft-500/40 whitespace-nowrap w-40">5. שם המוסך</th>
+                <th class="py-3 px-3 border-l border-skysoft-500/40 whitespace-nowrap w-36">6. סוג הפניה</th>
+                <th class="py-3 px-3 border-l border-skysoft-500/40 min-w-[240px]">7. בקשת לקוח</th>
+                <th class="py-3 px-3 border-l border-skysoft-500/40 min-w-[240px]">8. פתרון הבקשה</th>
+                <th class="py-3 px-3 border-l border-skysoft-500/40 whitespace-nowrap w-32">9. תאריך סגירה</th>
+                <th class="py-3 px-3 border-l border-skysoft-500/40 whitespace-nowrap w-28">10. שעת סגירה</th>
+                <th class="py-3 px-3 border-l border-skysoft-500/40 whitespace-nowrap w-32">11. טופל על ידי</th>
+                <th class="py-3 px-3 border-l border-skysoft-500/40 whitespace-nowrap w-40">12. זמן טיפול בפועל</th>
+            `;
+
+            state.customFields.forEach((cf, idx) => {
+                headersHtml += `<th class="py-3 px-3 border-l border-skysoft-500/40 whitespace-nowrap min-w-[140px]">${13 + idx}. ${escapeHtml(cf.label)}</th>`;
+            });
+
+            if (admin) {
+                headersHtml += `<th class="py-3 px-2 text-center whitespace-nowrap w-14">מחיקה</th>`;
+            }
+            headRow.innerHTML = headersHtml;
+
+            const emptyState = document.getElementById('empty-state');
+            if (filtered.length === 0) {
+                emptyState.classList.remove('hidden');
+                document.getElementById('tickets-tbody').innerHTML = '';
+                document.getElementById('cards-container').innerHTML = '';
+                return;
+            } else {
+                emptyState.classList.add('hidden');
+            }
+
+            const tbody = document.getElementById('tickets-tbody');
+            tbody.innerHTML = filtered.map(t => {
+                const isClosed = Boolean(t.closeDate && t.closeTime);
+                const duration = calculateDuration(t.openDate, t.openTime, t.closeDate, t.closeTime);
+                const rowBg = isClosed ? 'bg-emerald-50/25 hover:bg-skysoft-50/70' : 'bg-white hover:bg-skysoft-50/70';
+
+                const typeOptionsHtml = state.options.ticketTypes.map(opt =>
+                    `<option value="${escapeHtml(opt)}" ${t.ticketType === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>`
+                ).join('');
+
+                const handlerOptionsHtml = state.options.handlers.map(opt =>
+                    `<option value="${escapeHtml(opt)}" ${t.handledBy === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>`
+                ).join('');
+
+                const customColsHtml = state.customFields.map(cf => {
+                    const val = (t.customValues && t.customValues[cf.id]) || '';
+                    if (cf.type === 'textarea') {
+                        return `
+                            <td class="p-1.5 border-l border-skysoft-100 align-top">
+                                <textarea rows="1" data-live-edit="true"
+                                    oninput="autoResizeTextarea(this); handleLiveFieldInput('${t.id}', '${cf.id}', this.value, true)"
+                                    onchange="updateTicketField('${t.id}', '${cf.id}', this.value, true)"
+                                    class="auto-expand w-full p-2 bg-transparent focus:bg-white border border-transparent focus:border-skysoft-400 rounded-lg text-sm focus:outline-none">${escapeHtml(val)}</textarea>
+                            </td>`;
+                    }
+                    return `
+                        <td class="p-1.5 border-l border-skysoft-100 align-top">
+                            <input type="${cf.type === 'number' ? 'number' : 'text'}" value="${escapeHtml(val)}" data-live-edit="true"
+                                oninput="handleLiveFieldInput('${t.id}', '${cf.id}', this.value, true)"
+                                onchange="updateTicketField('${t.id}', '${cf.id}', this.value, true)"
+                                class="w-full p-2 bg-transparent focus:bg-white border border-transparent focus:border-skysoft-400 rounded-lg text-sm focus:outline-none">
+                        </td>`;
+                }).join('');
+
+                return `
+                    <tr class="${rowBg} transition-colors group">
+                        <!-- 1. מספר פניה + כפתור פתיחת כרטיס Access -->
+                        <td class="p-2 border-l border-skysoft-100 align-top font-mono font-bold text-skysoft-800 sticky-col ${isClosed ? 'bg-[#f6fcf9]' : 'bg-white'} group-hover:bg-skysoft-50">
+                            <button type="button" onclick="openAccessFormModal('${t.id}')" title="פתח כרטיס פניה מלא (תצוגת Access)"
+                                class="w-full flex items-center justify-between gap-1.5 py-1.5 px-2 rounded-xl hover:bg-skysoft-100/80 text-right transition cursor-pointer">
+                                <span class="flex items-center gap-1.5">
+                                    <span class="w-2 h-2 rounded-full ${isClosed ? 'bg-emerald-500' : 'bg-amber-400'} shrink-0"></span>
+                                    <span>${escapeHtml(t.id)}</span>
+                                </span>
+                                <i class="fa-solid fa-up-right-from-square text-[11px] text-skysoft-400 group-hover:text-skysoft-700"></i>
+                            </button>
+                        </td>
+
+                        <!-- 2. תאריך פתיחה -->
+                        <td class="p-2 border-l border-skysoft-100 align-top text-slate-600 font-mono text-xs sm:text-sm">
+                            ${admin
+                                ? `<input type="text" value="${escapeHtml(t.openDate)}" data-live-edit="true" onchange="updateTicketField('${t.id}', 'openDate', this.value)" class="w-full p-1.5 bg-transparent focus:bg-white border border-transparent focus:border-skysoft-400 rounded-lg font-mono">`
+                                : `<div class="py-1.5 px-1">${escapeHtml(t.openDate)}</div>`
+                            }
+                        </td>
+
+                        <!-- 3. שעה אוטומטית -->
+                        <td class="p-2 border-l border-skysoft-100 align-top text-slate-600 font-mono text-xs sm:text-sm">
+                            ${admin
+                                ? `<input type="text" value="${escapeHtml(t.openTime)}" data-live-edit="true" onchange="updateTicketField('${t.id}', 'openTime', this.value)" class="w-full p-1.5 bg-transparent focus:bg-white border border-transparent focus:border-skysoft-400 rounded-lg font-mono">`
+                                : `<div class="py-1.5 px-1">${escapeHtml(t.openTime)}</div>`
+                            }
+                        </td>
+
+                        <!-- 4. שם הפונה -->
+                        <td class="p-1.5 border-l border-skysoft-100 align-top">
+                            <input type="text" value="${escapeHtml(t.callerName)}" placeholder="הקלד שם..."
+                                data-ticket-id="${t.id}" data-field="callerName" data-live-edit="true"
+                                oninput="handleLiveFieldInput('${t.id}', 'callerName', this.value)"
+                                onchange="updateTicketField('${t.id}', 'callerName', this.value)"
+                                class="w-full p-2 bg-transparent focus:bg-white border border-transparent focus:border-skysoft-400 rounded-lg text-sm font-medium focus:outline-none">
+                        </td>
+
+                        <!-- 5. שם המוסך -->
+                        <td class="p-1.5 border-l border-skysoft-100 align-top">
+                            <input type="text" value="${escapeHtml(t.garageName)}" placeholder="שם המוסך..."
+                                data-live-edit="true"
+                                oninput="handleLiveFieldInput('${t.id}', 'garageName', this.value)"
+                                onchange="updateTicketField('${t.id}', 'garageName', this.value)"
+                                class="w-full p-2 bg-transparent focus:bg-white border border-transparent focus:border-skysoft-400 rounded-lg text-sm focus:outline-none">
+                        </td>
+
+                        <!-- 6. סוג הפניה -->
+                        <td class="p-1.5 border-l border-skysoft-100 align-top">
+                            <select onchange="updateTicketField('${t.id}', 'ticketType', this.value)"
+                                class="w-full p-2 bg-skysoft-50/70 hover:bg-skysoft-100/70 border border-skysoft-200/80 rounded-xl text-xs sm:text-sm font-medium text-skysoft-900 focus:outline-none focus:ring-2 focus:ring-skysoft-400">
+                                ${typeOptionsHtml}
+                            </select>
+                        </td>
+
+                        <!-- 7. בקשת לקוח (מתרחב אוטומטית) -->
+                        <td class="p-1.5 border-l border-skysoft-100 align-top">
+                            <textarea rows="1" placeholder="תיאור בקשת הלקוח..." data-live-edit="true"
+                                oninput="autoResizeTextarea(this); handleLiveFieldInput('${t.id}', 'request', this.value)"
+                                onchange="updateTicketField('${t.id}', 'request', this.value)"
+                                class="auto-expand w-full p-2 bg-skysoft-50/30 focus:bg-white border border-transparent focus:border-skysoft-400 rounded-xl text-sm focus:outline-none">${escapeHtml(t.request)}</textarea>
+                        </td>
+
+                        <!-- 8. פתרון הבקשה (מתרחב אוטומטית) -->
+                        <td class="p-1.5 border-l border-skysoft-100 align-top">
+                            <textarea rows="1" placeholder="הקלד את פתרון הבקשה..." data-live-edit="true"
+                                oninput="autoResizeTextarea(this); handleLiveFieldInput('${t.id}', 'solution', this.value)"
+                                onchange="updateTicketField('${t.id}', 'solution', this.value)"
+                                class="auto-expand w-full p-2 bg-skysoft-50/30 focus:bg-white border border-transparent focus:border-skysoft-400 rounded-xl text-sm focus:outline-none">${escapeHtml(t.solution)}</textarea>
+                        </td>
+
+                        <!-- 9. תאריך סגירה (לחיצה למילוי אוטומטי) -->
+                        <td class="p-1.5 border-l border-skysoft-100 align-top">
+                            ${t.closeDate
+                                ? `<div class="flex items-center justify-between gap-1 px-2 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 font-mono text-xs sm:text-sm">
+                                     <span onclick="stampClosingField('${t.id}', 'closeDate')" class="cursor-pointer" title="לחץ לעדכון לתאריך עכשיו">${escapeHtml(t.closeDate)}</span>
+                                     ${admin ? `<button onclick="clearClosingFields('${t.id}')" title="איפוס סגירה" class="text-emerald-600 hover:text-red-600 px-1 cursor-pointer"><i class="fa-solid fa-xmark"></i></button>` : ''}
+                                   </div>`
+                                : `<button type="button" onclick="stampClosingField('${t.id}', 'closeDate')"
+                                     class="w-full py-2 px-2 bg-skysoft-50 hover:bg-skysoft-100 active:scale-95 text-skysoft-700 border border-dashed border-skysoft-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer">
+                                     <i class="fa-regular fa-calendar-check"></i>
+                                     <span>סגור כעת</span>
+                                   </button>`
+                            }
+                        </td>
+
+                        <!-- 10. שעת סגירה (לחיצה למילוי אוטומטי) -->
+                        <td class="p-1.5 border-l border-skysoft-100 align-top">
+                            ${t.closeTime
+                                ? `<div onclick="stampClosingField('${t.id}', 'closeTime')" title="לחץ לעדכון לשעה הנוכחית"
+                                     class="cursor-pointer px-2 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 font-mono text-xs sm:text-sm text-center">
+                                     ${escapeHtml(t.closeTime)}
+                                   </div>`
+                                : `<button type="button" onclick="stampClosingField('${t.id}', 'closeTime')"
+                                     class="w-full py-2 px-2 bg-skysoft-50 hover:bg-skysoft-100 active:scale-95 text-skysoft-700 border border-dashed border-skysoft-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer">
+                                     <i class="fa-regular fa-clock"></i>
+                                     <span>שעה</span>
+                                   </button>`
+                            }
+                        </td>
+
+                        <!-- 11. טופל על ידי -->
+                        <td class="p-1.5 border-l border-skysoft-100 align-top">
+                            <select onchange="updateTicketField('${t.id}', 'handledBy', this.value)"
+                                class="w-full p-2 bg-skysoft-50/70 hover:bg-skysoft-100/70 border border-skysoft-200/80 rounded-xl text-xs sm:text-sm font-medium text-skysoft-900 focus:outline-none focus:ring-2 focus:ring-skysoft-400">
+                                ${handlerOptionsHtml}
+                            </select>
+                        </td>
+
+                        <!-- 12. זמן טיפול בפועל (חישוב אוטומטי) -->
+                        <td class="p-2 border-l border-skysoft-100 align-top">
+                            ${duration
+                                ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-skysoft-100/80 text-skysoft-900 font-semibold text-xs">
+                                     <i class="fa-solid fa-stopwatch text-skysoft-600"></i>
+                                     ${escapeHtml(duration)}
+                                   </span>`
+                                : `<span class="text-xs text-slate-400 px-1 py-1.5 block">ממתין לסגירה...</span>`
+                            }
+                        </td>
+
+                        ${customColsHtml}
+
+                        ${admin ? `
+                            <td class="p-1.5 text-center align-top">
+                                <button onclick="promptDeleteTicket('${t.id}')" title="מחק פניה"
+                                    class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition cursor-pointer">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                            </td>
+                        ` : ''}
+                    </tr>
+                `;
+            }).join('');
+
+            renderMobileCards(filtered, admin);
+            requestAnimationFrame(resizeAllTextareas);
+        };
+
+        function renderMobileCards(filtered, admin) {
+            const container = document.getElementById('cards-container');
+            container.innerHTML = filtered.map(t => {
+                const isClosed = Boolean(t.closeDate && t.closeTime);
+                const duration = calculateDuration(t.openDate, t.openTime, t.closeDate, t.closeTime);
+
+                const typeOptionsHtml = state.options.ticketTypes.map(opt =>
+                    `<option value="${escapeHtml(opt)}" ${t.ticketType === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>`
+                ).join('');
+
+                const handlerOptionsHtml = state.options.handlers.map(opt =>
+                    `<option value="${escapeHtml(opt)}" ${t.handledBy === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>`
+                ).join('');
+
+                const customFieldsHtml = state.customFields.map(cf => {
+                    const val = (t.customValues && t.customValues[cf.id]) || '';
+                    return `
+                        <div>
+                            <label class="block text-xs font-bold text-skysoft-800 mb-1">${escapeHtml(cf.label)}</label>
+                            <input type="${cf.type === 'number' ? 'number' : 'text'}" value="${escapeHtml(val)}"
+                                oninput="handleLiveFieldInput('${t.id}', '${cf.id}', this.value, true)"
+                                onchange="updateTicketField('${t.id}', '${cf.id}', this.value, true)"
+                                class="w-full p-2.5 bg-skysoft-50/60 border border-skysoft-200 rounded-xl text-sm">
+                        </div>
+                    `;
+                }).join('');
+
+                return `
+                    <div class="bg-white rounded-3xl border ${isClosed ? 'border-emerald-200' : 'border-skysoft-200'} shadow-xs p-4 space-y-3.5">
+                        <!-- כותרת כרטיס -->
+                        <div class="flex items-center justify-between pb-2.5 border-b border-skysoft-100">
+                            <div class="flex items-center gap-2">
+                                <button type="button" onclick="openAccessFormModal('${t.id}')"
+                                    class="px-3 py-1 rounded-xl bg-skysoft-600 hover:bg-skysoft-700 text-white font-mono font-bold text-sm flex items-center gap-1.5 cursor-pointer">
+                                    <span>${escapeHtml(t.id)}</span>
+                                    <i class="fa-solid fa-up-right-from-square text-[10px]"></i>
+                                </button>
+                                <span class="text-xs text-slate-500 font-mono">${escapeHtml(t.openDate)} • ${escapeHtml(t.openTime)}</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="px-2.5 py-1 rounded-full text-xs font-bold ${isClosed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
+                                    ${isClosed ? 'סגורה' : 'פתוחה'}
+                                </span>
+                                ${admin ? `
+                                    <button onclick="promptDeleteTicket('${t.id}')" class="p-1.5 text-slate-400 hover:text-red-600 cursor-pointer">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                    </button>
+                                ` : ''}
+                            </div>
+                        </div>
+
+                        <!-- פונה ומוסך -->
+                        <div class="grid grid-cols-2 gap-2.5">
+                            <div>
+                                <label class="block text-xs font-bold text-skysoft-800 mb-1">שם הפונה</label>
+                                <input type="text" value="${escapeHtml(t.callerName)}" placeholder="הקלד שם..."
+                                    oninput="handleLiveFieldInput('${t.id}', 'callerName', this.value)"
+                                    onchange="updateTicketField('${t.id}', 'callerName', this.value)"
+                                    class="w-full p-2.5 bg-skysoft-50/60 border border-skysoft-200 rounded-xl text-sm font-medium">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-skysoft-800 mb-1">שם המוסך</label>
+                                <input type="text" value="${escapeHtml(t.garageName)}" placeholder="שם המוסך..."
+                                    oninput="handleLiveFieldInput('${t.id}', 'garageName', this.value)"
+                                    onchange="updateTicketField('${t.id}', 'garageName', this.value)"
+                                    class="w-full p-2.5 bg-skysoft-50/60 border border-skysoft-200 rounded-xl text-sm">
+                            </div>
+                        </div>
+
+                        <!-- סוג פניה ומטפל -->
+                        <div class="grid grid-cols-2 gap-2.5">
+                            <div>
+                                <label class="block text-xs font-bold text-skysoft-800 mb-1">סוג הפניה</label>
+                                <select onchange="updateTicketField('${t.id}', 'ticketType', this.value)"
+                                    class="w-full p-2.5 bg-skysoft-50 border border-skysoft-200 rounded-xl text-sm font-medium text-skysoft-900">
+                                    ${typeOptionsHtml}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-skysoft-800 mb-1">טופל על ידי</label>
+                                <select onchange="updateTicketField('${t.id}', 'handledBy', this.value)"
+                                    class="w-full p-2.5 bg-skysoft-50 border border-skysoft-200 rounded-xl text-sm font-medium text-skysoft-900">
+                                    ${handlerOptionsHtml}
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- בקשת לקוח -->
+                        <div>
+                            <label class="block text-xs font-bold text-skysoft-800 mb-1">בקשת לקוח</label>
+                            <textarea rows="2" placeholder="תיאור בקשת הלקוח..."
+                                oninput="autoResizeTextarea(this); handleLiveFieldInput('${t.id}', 'request', this.value)"
+                                onchange="updateTicketField('${t.id}', 'request', this.value)"
+                                class="auto-expand w-full p-2.5 bg-skysoft-50/50 border border-skysoft-200 rounded-xl text-sm">${escapeHtml(t.request)}</textarea>
+                        </div>
+
+                        <!-- פתרון הבקשה -->
+                        <div>
+                            <label class="block text-xs font-bold text-skysoft-800 mb-1">פתרון הבקשה</label>
+                            <textarea rows="2" placeholder="תיאור הפתרון שניתן..."
+                                oninput="autoResizeTextarea(this); handleLiveFieldInput('${t.id}', 'solution', this.value)"
+                                onchange="updateTicketField('${t.id}', 'solution', this.value)"
+                                class="auto-expand w-full p-2.5 bg-skysoft-50/50 border border-skysoft-200 rounded-xl text-sm">${escapeHtml(t.solution)}</textarea>
+                        </div>
+
+                        ${customFieldsHtml}
+
+                        <!-- סגירה וחישוב זמן טיפול -->
+                        <div class="pt-2 border-t border-skysoft-100 flex flex-wrap items-center justify-between gap-2">
+                            ${isClosed ? `
+                                <div class="flex items-center gap-2 text-xs bg-emerald-50 border border-emerald-200 text-emerald-800 px-3 py-2 rounded-xl font-semibold">
+                                    <i class="fa-solid fa-check-circle"></i>
+                                    <span>נסגר: ${escapeHtml(t.closeDate)} ${escapeHtml(t.closeTime)}</span>
+                                    ${admin ? `<button onclick="clearClosingFields('${t.id}')" class="mr-1 text-red-600 cursor-pointer"><i class="fa-solid fa-xmark"></i></button>` : ''}
+                                </div>
+                                <div class="text-xs font-bold text-skysoft-800 bg-skysoft-100 px-3 py-2 rounded-xl">
+                                    זמן טיפול: ${escapeHtml(duration)}
+                                </div>
+                            ` : `
+                                <button type="button" onclick="stampClosingField('${t.id}', 'closeDate')"
+                                    class="w-full py-3 bg-gradient-to-l from-skysoft-600 to-skysoft-500 text-white font-bold rounded-2xl text-sm flex items-center justify-center gap-2 shadow-2xs cursor-pointer">
+                                    <i class="fa-solid fa-check-double"></i>
+                                    <span>סמן פניה כסגורה עכשיו (מילוי תאריך ושעה)</span>
+                                </button>
+                            `}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // ==================== סינון חודשים וייצוא דוח אקסל ====================
+        const HEBREW_MONTHS = {
+            '01': 'ינואר', '02': 'פברואר', '03': 'מרץ', '04': 'אפריל',
+            '05': 'מאי', '06': 'יוני', '07': 'יולי', '08': 'אוגוסט',
+            '09': 'ספטמבר', '10': 'אוקטובר', '11': 'נובמבר', '12': 'דצמבר'
+        };
+
+        function getAvailableMonths() {
+            const set = new Set();
+            const { prefix } = getCurrentDateTimeParts();
+            set.add(prefix);
+            state.tickets.forEach(t => {
+                if (String(t.id).length >= 6) {
+                    set.add(String(t.id).slice(0, 6));
+                }
+            });
+            return Array.from(set).sort().reverse();
+        }
+
+        function formatMonthLabel(yyyymm) {
+            const year = yyyymm.slice(0, 4);
+            const month = yyyymm.slice(4, 6);
+            return `${HEBREW_MONTHS[month] || month} ${year} (${yyyymm})`;
+        }
+
+        function populateMonthFilters() {
+            const months = getAvailableMonths();
+            const mainFilter = document.getElementById('month-filter');
+            if (!mainFilter) return;
+            const currentVal = mainFilter.value;
+
+            mainFilter.innerHTML = `<option value="ALL">כל החודשים (${state.tickets.length})</option>` +
+                months.map(m => `<option value="${m}">${formatMonthLabel(m)}</option>`).join('');
+
+            if (months.includes(currentVal)) {
+                mainFilter.value = currentVal;
+            }
+        }
+
+        window.openExportModal = function() {
+            if (!isAdmin()) return;
+            const months = getAvailableMonths();
+            const select = document.getElementById('export-month-select');
+            select.innerHTML = months.map(m => `<option value="${m}">${formatMonthLabel(m)}</option>`).join('') +
+                `<option value="ALL">כל הנתונים במערכת</option>`;
+
+            updateExportPreview();
+            document.getElementById('export-modal').classList.remove('hidden');
+        };
+
+        window.closeExportModal = function() {
+            document.getElementById('export-modal').classList.add('hidden');
+        };
+
+        function getReportTickets() {
+            const selectedMonth = document.getElementById('export-month-select').value;
+            if (selectedMonth === 'ALL') return [...state.tickets];
+            return state.tickets.filter(t => String(t.id).startsWith(selectedMonth));
+        }
+
+        window.updateExportPreview = function() {
+            const list = getReportTickets();
+            const closed = list.filter(t => t.closeDate && t.closeTime).length;
+            document.getElementById('export-count-total').textContent = list.length;
+            document.getElementById('export-count-closed').textContent = closed;
+            document.getElementById('export-count-open').textContent = list.length - closed;
+        };
+
+        function buildExcelWorkbook() {
+            const list = getReportTickets();
+            const selectedMonth = document.getElementById('export-month-select').value;
+
+            const rows = list.map(t => {
+                const rowObj = {
+                    'מספר פניה': t.id,
+                    'תאריך פתיחה': t.openDate,
+                    'שעת פתיחה': t.openTime,
+                    'שם הפונה': t.callerName,
+                    'שם המוסך': t.garageName,
+                    'סוג הפניה': t.ticketType,
+                    'בקשת לקוח': t.request,
+                    'פתרון הבקשה': t.solution,
+                    'תאריך סגירה': t.closeDate || 'פתוח',
+                    'שעת סגירה': t.closeTime || '',
+                    'טופל על ידי': t.handledBy,
+                    'זמן טיפול בפועל': calculateDuration(t.openDate, t.openTime, t.closeDate, t.closeTime) || 'בטיפול'
+                };
+
+                state.customFields.forEach(cf => {
+                    rowObj[cf.label] = (t.customValues && t.customValues[cf.id]) || '';
+                });
+
+                return rowObj;
+            });
+
+            const worksheet = XLSX.utils.json_to_sheet(rows);
+            worksheet['!views'] = [{ rightToLeft: true }];
+            worksheet['!cols'] = [
+                { wch: 14 }, { wch: 14 }, { wch: 10 }, { wch: 18 },
+                { wch: 22 }, { wch: 16 }, { wch: 40 }, { wch: 40 },
+                { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 24 }
+            ];
+
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, 'דוח פניות לקוחות');
+            const fileName = `דוח_פניות_לקוחות_${selectedMonth}.xlsx`;
+
+            return { workbook, fileName, list, selectedMonth };
+        }
+
+        window.downloadExcelReport = function() {
+            const { workbook, fileName } = buildExcelWorkbook();
+            XLSX.writeFile(workbook, fileName);
+            showToast(`קובץ האקסל "${fileName}" הורד בהצלחה`);
+        };
+
+        window.shareReport = async function(platform) {
+            const { workbook, fileName, list, selectedMonth } = buildExcelWorkbook();
+            const closed = list.filter(t => t.closeDate && t.closeTime).length;
+            const monthTitle = selectedMonth === 'ALL' ? 'כל התקופות' : formatMonthLabel(selectedMonth);
+
+            const summaryText =
+                `דוח מעקב פניות לקוחות - ${monthTitle}\n` +
+                `סה״כ פניות: ${list.length}\n` +
+                `פניות שנסגרו: ${closed}\n` +
+                `פניות פתוחות: ${list.length - closed}\n` +
+                `הופק ע״י: ${state.currentUser.username}`;
+
+            try {
+                const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+                const file = new File([wbout], fileName, {
+                    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                });
+
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        title: `דוח פניות לקוחות - ${monthTitle}`,
+                        text: summaryText,
+                        files: [file]
+                    });
+                    return;
+                }
+            } catch (err) {
+                console.log('Fallback to direct download + link share');
+            }
+
+            XLSX.writeFile(workbook, fileName);
+
+            const encodedText = encodeURIComponent(summaryText + `\n\n(קובץ האקסל ${fileName} ירד למחשב - נא לצרף אותו להודעה)`);
+            if (platform === 'whatsapp') {
+                window.open(`https://wa.me/?text=${encodedText}`, '_blank');
+            } else {
+                const subject = encodeURIComponent(`דוח פניות לקוחות - ${monthTitle}`);
+                window.open(`mailto:?subject=${subject}&body=${encodedText}`, '_blank');
+            }
+        };
+
+        // ==================== פאנל ניהול מערכת והרשאות בענן (מנהל בלבד) ====================
+        window.openAdminModal = function() {
+            if (!isAdmin()) return;
+            renderAdminUsers();
+            renderAdminOptions();
+            renderAdminCustomFields();
+            document.getElementById('admin-modal').classList.remove('hidden');
+        };
+
+        window.closeAdminModal = function() {
+            document.getElementById('admin-modal').classList.add('hidden');
+            renderTable();
+        };
+
+        window.switchAdminTab = function(tabName) {
+            ['users', 'options', 'fields'].forEach(t => {
+                document.getElementById(`admin-tab-${t}`).classList.toggle('hidden', t !== tabName);
+                const btn = document.getElementById(`tab-btn-${t}`);
+                if (t === tabName) {
+                    btn.className = 'px-4 py-2.5 rounded-t-xl font-bold text-sm bg-white text-skysoft-700 border-t border-x border-skysoft-200 cursor-pointer';
+                } else {
+                    btn.className = 'px-4 py-2.5 rounded-t-xl font-semibold text-sm text-slate-600 hover:text-skysoft-700 cursor-pointer';
+                }
+            });
+        };
+
+        function renderAdminUsers() {
+            const container = document.getElementById('admin-users-list');
+            container.innerHTML = state.users.map(u => `
+                <div class="flex flex-wrap items-center justify-between gap-2 p-3 bg-white border border-skysoft-200 rounded-2xl">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-xl ${u.role === 'admin' ? 'bg-skysoft-600 text-white' : 'bg-skysoft-100 text-skysoft-700'} flex items-center justify-center font-bold">
+                            ${escapeHtml(u.username.charAt(0))}
+                        </div>
+                        <div>
+                            <div class="font-bold text-sm text-slate-800">${escapeHtml(u.username)}</div>
+                            <div class="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
+                                <span>סיסמה:</span>
+                                <input type="text" value="${escapeHtml(u.password)}"
+                                    onchange="updateUserPassword('${u.id}', this.value)"
+                                    class="w-24 px-2 py-0.5 bg-skysoft-50 border border-skysoft-200 rounded-lg font-mono text-xs font-bold text-skysoft-900">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                        <select onchange="changeUserRole('${u.id}', this.value)"
+                            class="p-2 bg-skysoft-50 border border-skysoft-200 rounded-xl text-xs font-bold text-skysoft-900">
+                            <option value="user" ${u.role === 'user' ? 'selected' : ''}>משתמש רגיל</option>
+                            <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>מנהל</option>
+                        </select>
+                        ${u.id !== state.currentUser.id ? `
+                            <button onclick="deleteUser('${u.id}')" class="p-2 text-red-500 hover:bg-red-50 rounded-xl text-sm cursor-pointer" title="מחק משתמש">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        ` : `<span class="text-[11px] text-skysoft-600 font-semibold px-2">(מחובר)</span>`}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        window.handleAddUser = async function(e) {
+            e.preventDefault();
+            if (!isAdmin() || !firebaseUser) return;
+            const username = document.getElementById('new-user-name').value.trim();
+            const password = document.getElementById('new-user-pass').value.trim();
+            const role = document.getElementById('new-user-role').value;
+
+            if (!username || !password) return;
+            if (state.users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
+                showToast('שם משתמש זה כבר קיים במערכת');
+                return;
+            }
+
+            const newId = 'u_' + Date.now();
+            try {
+                await setDoc(getUserDoc(newId), {
+                    id: newId,
+                    username,
+                    password,
+                    role
+                });
+                document.getElementById('new-user-name').value = '';
+                document.getElementById('new-user-pass').value = '';
+                showToast(`המשתמש "${username}" נוסף וסונכרן בענן`);
+            } catch (err) {
+                console.error('Error adding user:', err);
+            }
+        };
+
+        window.updateUserPassword = async function(userId, newPassword) {
+            if (!isAdmin() || !firebaseUser || !newPassword.trim()) return;
+            try {
+                await updateDoc(getUserDoc(userId), { password: newPassword.trim() });
+                showToast('הסיסמה עודכנה בענן');
+            } catch (err) {
+                console.error('Error updating password:', err);
+            }
+        };
+
+        window.changeUserRole = async function(userId, newRole) {
+            if (!isAdmin() || !firebaseUser) return;
+            try {
+                await updateDoc(getUserDoc(userId), { role: newRole });
+                showToast('הרשאת המשתמש עודכנה בענן');
+            } catch (err) {
+                console.error('Error changing role:', err);
+            }
+        };
+
+        window.deleteUser = async function(userId) {
+            if (!isAdmin() || !firebaseUser) return;
+            try {
+                await deleteDoc(getUserDoc(userId));
+                showToast('המשתמש הוסר מהמערכת');
+            } catch (err) {
+                console.error('Error deleting user:', err);
+            }
+        };
+
+        function renderAdminOptions() {
+            ['ticketTypes', 'handlers'].forEach(key => {
+                const ul = document.getElementById(`list-${key}`);
+                ul.innerHTML = state.options[key].map((opt, idx) => `
+                    <li class="flex items-center justify-between px-3 py-2 bg-white border border-skysoft-200 rounded-xl text-sm">
+                        <span class="font-medium text-slate-800">${escapeHtml(opt)}</span>
+                        ${state.options[key].length > 1 ? `
+                            <button onclick="removeDropdownOption('${key}', ${idx})" class="text-slate-400 hover:text-red-600 px-1.5 cursor-pointer">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        ` : ''}
+                    </li>
+                `).join('');
+            });
+        }
+
+        window.addDropdownOption = async function(key, inputId) {
+            if (!isAdmin() || !firebaseUser) return;
+            const input = document.getElementById(inputId);
+            const val = input.value.trim();
+            if (!val) return;
+            if (!state.options[key].includes(val)) {
+                const updatedList = [...state.options[key], val];
+                try {
+                    await setDoc(getSettingsDoc(), {
+                        options: {
+                            ...state.options,
+                            [key]: updatedList
+                        }
+                    }, { merge: true });
+                    showToast(`נוספה אפשרות: "${val}"`);
+                } catch (err) {
+                    console.error('Error adding option:', err);
+                }
+            }
+            input.value = '';
+        };
+
+        window.removeDropdownOption = async function(key, idx) {
+            if (!isAdmin() || !firebaseUser) return;
+            const updatedList = state.options[key].filter((_, i) => i !== idx);
+            try {
+                await setDoc(getSettingsDoc(), {
+                    options: {
+                        ...state.options,
+                        [key]: updatedList
+                    }
+                }, { merge: true });
+            } catch (err) {
+                console.error('Error removing option:', err);
+            }
+        };
+
+        function renderAdminCustomFields() {
+            const list = document.getElementById('custom-fields-list');
+            if (state.customFields.length === 0) {
+                list.innerHTML = `<p class="text-sm text-slate-500 bg-skysoft-50 p-4 rounded-2xl text-center">טרם נוספו עמודות מותאמות אישית מעבר ל-12 עמודות הבסיס.</p>`;
+                return;
+            }
+            list.innerHTML = state.customFields.map(cf => `
+                <div class="flex items-center justify-between p-3 bg-white border border-skysoft-200 rounded-2xl">
+                    <div>
+                        <span class="font-bold text-sm text-skysoft-900">${escapeHtml(cf.label)}</span>
+                        <span class="text-xs text-slate-500 mr-2">(${cf.type === 'textarea' ? 'טקסט מתרחב' : cf.type === 'number' ? 'מספר' : 'טקסט'})</span>
+                    </div>
+                    <button onclick="deleteCustomField('${cf.id}')" class="px-3 py-1.5 text-red-600 hover:bg-red-50 rounded-xl text-xs font-bold cursor-pointer">
+                        הסר עמודה
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        window.handleAddCustomField = async function(e) {
+            e.preventDefault();
+            if (!isAdmin() || !firebaseUser) return;
+            const label = document.getElementById('new-field-label').value.trim();
+            const type = document.getElementById('new-field-type').value;
+            if (!label) return;
+
+            const updatedFields = [
+                ...state.customFields,
+                { id: 'cf_' + Date.now(), label, type }
+            ];
+
+            try {
+                await setDoc(getSettingsDoc(), { customFields: updatedFields }, { merge: true });
+                document.getElementById('new-field-label').value = '';
+                showToast(`העמודה "${label}" נוספה לטבלה וסונכרנה בענן`);
+            } catch (err) {
+                console.error('Error adding custom field:', err);
+            }
+        };
+
+        window.deleteCustomField = async function(fieldId) {
+            if (!isAdmin() || !firebaseUser) return;
+            const updatedFields = state.customFields.filter(cf => cf.id !== fieldId);
+            try {
+                await setDoc(getSettingsDoc(), { customFields: updatedFields }, { merge: true });
+                showToast('העמודה הוסרה');
+            } catch (err) {
+                console.error('Error deleting custom field:', err);
+            }
+        };
+
+        // ==================== כלי עזר ====================
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        let toastTimeout;
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-text').textContent = message;
+            toast.classList.remove('hidden');
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 3000);
+        }
+
+        // הפעלת הסנכרון בזמן אמת בטעינת הדף
+        window.addEventListener('DOMContentLoaded', initCloudSync);
+        window.addEventListener('resize', resizeAllTextareas);
+    </script>
+</body>
+</html>
